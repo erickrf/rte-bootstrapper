@@ -64,7 +64,7 @@ class CorpusManager(object):
         '''
         path = os.path.join(self.directory, self[number])
         with open(path, 'rb') as f:
-            text = f.read()        
+            text = f.read()
         
         return self.get_tokens_from_text(text, split_sentences)
     
@@ -76,7 +76,17 @@ class CorpusManager(object):
         :param split_sentences: if True, tokens are given in lists
             representing sentences
         '''
-        sentences = nlpnet.tokenize(text, 'pt')
+        # we assume that lines contain whole paragraphs. In this case, we can split
+        # on line breaks, because no sentence will have a line break within it.
+        # also, it helps to properly separate titles without a full stop
+        paragraphs = text.split('\n')
+        
+        sentences = []
+        for paragraph in paragraphs:
+            # don't change to lower case yet in order not to mess with the
+            # sentence splitter
+            par_sentences = nlpnet.tokenize(paragraph, 'pt')
+            sentences.extend(par_sentences)
         
         # make a single list with all tokens in lower case, and replace
         # all digits by 9
@@ -101,7 +111,7 @@ class CorpusManager(object):
                 text = f.read()
             
             tokens = self.get_tokens_from_text(text)
-             
+            
             if self.yield_tokens:
                 yield tokens
             else:

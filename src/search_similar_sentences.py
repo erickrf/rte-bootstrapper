@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import unicode_literals
-from pandas.core.config_init import doc
 
 '''
 Script to search for similar sentences, candidates to being RTE pairs.
@@ -41,14 +40,14 @@ class VectorSpaceAnalyzer(object):
         '''
         if os.path.isfile(corpus):
             self.cm = gensim.corpora.MmCorpus(corpus)
-            using_corpus_manager = False
+            self.using_corpus_manager = False
         else:
             self.cm = CorpusManager(corpus)
-            using_corpus_manager = True
+            self.using_corpus_manager = True
         
         self.create_dictionary(dictionary, stopwords)
         
-        if using_corpus_manager:
+        if self.using_corpus_manager:
             self.cm.set_yield_ids(self.token_dict)
         
         self.create_tfidf_model(tfidf)
@@ -152,10 +151,12 @@ class VectorSpaceAnalyzer(object):
         
         self.index.save('index.dat')
     
-    def find_similar_documents(self, tokens, number=10):
+    def find_similar_documents(self, tokens, number=10, return_scores=True):
         '''
-        Find and return the most similar documents to the one represented
+        Find and return the ids of the most similar documents to the one represented
         by tokens.
+        
+        :param return_scores: if True, return instead a tuple (ids, similarities)
         '''
         # create a bag of words from the document
         bow = self.token_dict.doc2bow(tokens)
@@ -170,35 +171,65 @@ class VectorSpaceAnalyzer(object):
         
         # the similarities array contains the simliraty value for each document
         # we pick the indices in the order that would sort it
-        indices = similarities.argsort()[-number:][::-1]
+        indices = similarities.argsort()
         
-        # get the document names
-        docs = [self.cm[idx]
-                for idx in indices]
+        # exclude the first one because it is the compared document itself
+        # [::-1] reverses the order
+        top_indices = indices[-(number + 1):-1][::-1]
         
-        return docs
+        if return_scores:
+            return (top_indices, similarities[top_indices])
+        else:
+            return top_indices
     
-    def find_rte_candidates(self, sentence):
+    def find_rte_candidates(self, doc_num, doc_threshold=0.9, sent_threshold=0.8):
         '''
-        Find and return RTE candidates to be used with the given sentence.
+        Find and return RTE candidates from the n-th document in the collection
         '''
-        # exclude the first one because it is 
-        similar_docs = self.find_similar_documents(sentence, 5)[1:]
-        for doc in similar_docs:
+        if self.using_corpus_manager:
+            tokens_by_sent = self.cm.get_tokens_from_document(doc_num, split_sentences=True)
+        else:
+            raise NotImplementedError('Can\'t use this function with MM corpus')
+        
+        all_tokens = [token
+                      for sent in tokens_by_sent
+                      for token in sent]
+        candidate_pairs = []
+        
+        similar_docs, scores = self.find_similar_documents(all_tokens, 5)
+        for doc, score in zip(similar_docs, scores):
+            if score < doc_threshold:
+                # when a score is below the threshold, we know the following ones
+                # will also be, because find_similar_documents returns an ordered list
+                break
+            
             doc_content = self.cm.get_tokens_from_document(doc, True)
+            for sent in tokens_by_sent:
+                similar_sentences, similar_scores = self.find_similar_sentences(sent, doc_content, 5)
+                for similar_sent, similar_score in zip (similar_sentences, similar_scores):
+                    if similar_score < sent_threshold:
+                        break
+                    
+                    candidate_pairs.append((sent, similar_sent))
+        
+        return candidate_pairs
             
     
-    def find_similar_sentences(self, target_sentence, sentences, number=10):
+    def find_similar_sentences(self, target_sentence, sentences, number=5,
+                               return_scores=True):
         '''
         Find and return similar sentences from the target one among all the
         given sentences.
         
         :param target_sentence: a list of tokens
         :param sentences: a list of lists of tokens (or something that
-            can yield lists of tokens when iterated
+            can yield lists of tokens when iterated)
         :param number: number of sentences to find
+        :param return_scores: if True, return a tuple with the sentences
+            and their similarity scores
         '''
-        sentences_tfidf = self.tfidf[sentences]
+        sentences_bow = [self.token_dict.doc2bow(sent) for sent in sentences]
+        sentences_tfidf = self.tfidf[sentences_bow]
         sentences_lsi = self.lsi[sentences_tfidf]
         
         # create an index over the given sentences
@@ -214,7 +245,10 @@ class VectorSpaceAnalyzer(object):
         indices = similarities.argsort()[-number:][::-1]
         
         results = [sentences[idx] for idx in indices]
-        return results
+        if return_scores:
+            return (results, similarities[indices])
+        else:
+            return results
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -225,7 +259,7 @@ if __name__ == '__main__':
     parser.add_argument('--tf-idf', help='TF-IDF model file', dest='tfidf')
     parser.add_argument('--lsi', help='LSI model file')
     parser.add_argument('corpus', help='Directory containing corpus files or MM file with corpus contents')
-    parser.add_argument('query', help='Query for similar documents')
+#     parser.add_argument('query', help='Query for similar documents')
     args = parser.parse_args()
     
     logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', 
@@ -233,9 +267,6 @@ if __name__ == '__main__':
     
     vsa = VectorSpaceAnalyzer(args.corpus, args.dictionary, args.stopwords, 
                               args.tfidf, args.lsi, args.index, args.topics)
-    docs = vsa.find_similar_documents(args.query.decode('latin1').split(), 5)
-    for doc in docs:
-        print doc
     
     
     
