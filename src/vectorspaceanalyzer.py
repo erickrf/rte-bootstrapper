@@ -14,9 +14,10 @@ making them non-trivial to classify correctly.
 import logging
 import re
 import os
-import argparse
 import gensim
 
+import utils
+import rte_data
 from corpusmanager import CorpusManager
 
 class VectorSpaceAnalyzer(object):
@@ -55,6 +56,8 @@ class VectorSpaceAnalyzer(object):
         
         # create similarity index
         self.create_index(index)
+        
+        self.ignored_docs = set()
 
     def create_dictionary(self, filename=None, stopwords_file=None, minimum_df=2):
         '''
@@ -173,26 +176,46 @@ class VectorSpaceAnalyzer(object):
         # we pick the indices in the order that would sort it
         indices = similarities.argsort()
         
+        # [::-1] reverses the order, so we have the greatest values first
+        indices = indices[::-1]
+        
+        top_indices = []
         # exclude the first one because it is the compared document itself
-        # [::-1] reverses the order
-        top_indices = indices[-(number + 1):-1][::-1]
+        for index in indices[1:]:
+            if index in self.ignored_docs:
+                continue
+            
+            top_indices.append(index)
+            
+            if len(top_indices) == number:
+                break
         
         if return_scores:
             return (top_indices, similarities[top_indices])
         else:
             return top_indices
     
+    def add_to_ignored_docs(self, doc_num):
+        '''
+        Add a document (by its number) to the list of ignored ones. Ignored documents
+        are not considered when searching for RTE candidates. This is done in order
+        to avoid repeated (T, H) pairs.
+        '''
+        self.ignored_docs.add(doc_num)
+        
+    
     def find_rte_candidates(self, doc_num, doc_threshold=0.9, sent_threshold=0.8):
         '''
         Find and return RTE candidates from the n-th document in the collection
         '''
-        if self.using_corpus_manager:
-            tokens_by_sent = self.cm.get_tokens_from_document(doc_num, split_sentences=True)
-        else:
+        if not self.using_corpus_manager:
             raise NotImplementedError('Can\'t use this function with MM corpus')
         
+        doc_sentences = self.cm.get_sentences_from_document(doc_num)
+        tokenized_doc_sentences = [utils.tokenize_sentence(sent)
+                                   for sent in doc_sentences]
         all_tokens = [token
-                      for sent in tokens_by_sent
+                      for sent in tokenized_doc_sentences
                       for token in sent]
         candidate_pairs = []
         
@@ -203,14 +226,29 @@ class VectorSpaceAnalyzer(object):
                 # will also be, because find_similar_documents returns an ordered list
                 break
             
-            doc_content = self.cm.get_tokens_from_document(doc, True)
-            for sent in tokens_by_sent:
-                similar_sentences, similar_scores = self.find_similar_sentences(sent, doc_content, 5)
-                for similar_sent, similar_score in zip (similar_sentences, similar_scores):
+            # these are tokenized to be used in find_similar_sentences
+            similar_doc_sentences = self.cm.get_sentences_from_document(doc)
+            tokenized_similar_sentences = [utils.tokenize_sentence(sent)
+                                           for sent in similar_doc_sentences]
+            
+            for i, sent in enumerate(tokenized_doc_sentences):
+                # we are searching for sentences similar to our i-th doc sentence
+                sent_similarities = self.find_similar_sentences(sent, tokenized_similar_sentences, 5)
+                
+                for index, similar_score in zip(*sent_similarities):
                     if similar_score < sent_threshold:
                         break
                     
-                    candidate_pairs.append((sent, similar_sent))
+                    if similar_score >= 0.99:
+                        # same sentence
+                        continue
+                    
+                    base_sent = doc_sentences[i]
+                    similar_sent = similar_doc_sentences[index]
+                    pair = rte_data.Pair(base_sent, similar_sent, similarity=str(similar_score))
+                    pair.set_t_attributes(document=str(doc_num))
+                    pair.set_h_attributes(document=str(doc))
+                    candidate_pairs.append(pair)
         
         return candidate_pairs
             
@@ -233,7 +271,8 @@ class VectorSpaceAnalyzer(object):
         sentences_lsi = self.lsi[sentences_tfidf]
         
         # create an index over the given sentences
-        sentence_index = gensim.similarities.MatrixSimilarity(sentences_lsi)
+        sentence_index = gensim.similarities.MatrixSimilarity(sentences_lsi, 
+                                                              num_features=self.lsi.num_topics)
         
         # now convert the target
         bow = self.token_dict.doc2bow(target_sentence)
@@ -244,29 +283,7 @@ class VectorSpaceAnalyzer(object):
         # get the indices of the most similar sentences
         indices = similarities.argsort()[-number:][::-1]
         
-        results = [sentences[idx] for idx in indices]
         if return_scores:
-            return (results, similarities[indices])
+            return (indices, similarities[indices])
         else:
-            return results
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--dictionary', help='Previously saved gensim dictionary')
-    parser.add_argument('-s', '--stopwords', help='File containing stopwords')
-    parser.add_argument('-t', '--topics', help='Number of LSA topics (default 100)', default=100)
-    parser.add_argument('-i', '--index', help='Previously saved index')
-    parser.add_argument('--tf-idf', help='TF-IDF model file', dest='tfidf')
-    parser.add_argument('--lsi', help='LSI model file')
-    parser.add_argument('corpus', help='Directory containing corpus files or MM file with corpus contents')
-#     parser.add_argument('query', help='Query for similar documents')
-    args = parser.parse_args()
-    
-    logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', 
-                        level=logging.INFO)
-    
-    vsa = VectorSpaceAnalyzer(args.corpus, args.dictionary, args.stopwords, 
-                              args.tfidf, args.lsi, args.index, args.topics)
-    
-    
-    
+            return indices

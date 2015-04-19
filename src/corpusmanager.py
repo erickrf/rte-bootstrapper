@@ -4,7 +4,8 @@
 import os
 import re
 
-import nlpnet
+import nltk
+import utils
 
 class CorpusManager(object):
     '''
@@ -54,63 +55,58 @@ class CorpusManager(object):
         '''
         return self.files[index]
     
-    def get_tokens_from_document(self, number, split_sentences=False):
+    def get_text_from_document(self, number):
         '''
-        Return the tokens (processed by `get_tokens_from_text`) from the i-th
-        document.
-        
-        :param split_sentences: if True, tokens are given in lists
-            representing sentences
+        Return the text content from the n-th document in the corpus.
         '''
         path = os.path.join(self.directory, self[number])
         with open(path, 'rb') as f:
-            text = f.read()
+            text = f.read().decode('utf-8')
         
-        return self.get_tokens_from_text(text, split_sentences)
+        return text        
     
-    def get_tokens_from_text(self, text, split_sentences=False): 
+    def get_sentences_from_document(self, number):
         '''
-        Tokenize and preprocesses the given text.
-        Preprocessing includes lower case and conversion of digits to 9.
+        Return a list of sentences contained in the document, without any preprocessing
+        or tokenization.
+        '''
+        text = self.get_text_from_document(number)
         
-        :param split_sentences: if True, tokens are given in lists
-            representing sentences
-        '''
         # we assume that lines contain whole paragraphs. In this case, we can split
         # on line breaks, because no sentence will have a line break within it.
         # also, it helps to properly separate titles without a full stop
         paragraphs = text.split('\n')
-        
         sentences = []
+        sent_tokenizer = nltk.data.load('tokenizers/punkt/portuguese.pickle')
+        
         for paragraph in paragraphs:
             # don't change to lower case yet in order not to mess with the
             # sentence splitter
-            par_sentences = nlpnet.tokenize(paragraph, 'pt')
+            par_sentences = sent_tokenizer.tokenize(paragraph, 'pt')
             sentences.extend(par_sentences)
         
-        # make a single list with all tokens in lower case, and replace
-        # all digits by 9
-        if split_sentences:
-            tokens = [[re.sub(r'\d', '9', token.lower()) for token in sent]
-                      for sent in sentences]
-        else:
-            tokens = [re.sub(r'\d', '9', token.lower())
-                      for sent in sentences
-                      for token in sent]
+        return sentences        
         
-        return tokens
+    def get_tokens_from_document(self, number): 
+        '''
+        Tokenize and preprocesses the given text.
+        Preprocessing includes lower case and conversion of digits to 9.
+        '''
+        sentences = self.get_sentences_from_document(number)
+        
+        all_tokens = [token
+                      for sent in sentences
+                      for token in utils.tokenize_sentence(sent)]
+        
+        return all_tokens
     
     def __iter__(self):
         '''
         Yield the text from a document inside the corpus directory.
         Stopwords are filtered out.
         '''
-        for filename in self.files:
-            path = os.path.join(self.directory, filename)
-            with open(path, 'rb') as f:
-                text = f.read()
-            
-            tokens = self.get_tokens_from_text(text)
+        for i in range(len(self.files)):
+            tokens = self.get_tokens_from_document(i)
             
             if self.yield_tokens:
                 yield tokens
