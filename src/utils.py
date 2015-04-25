@@ -18,8 +18,8 @@ def detokenize(tokens):
 
 def tokenize_sentence(text, preprocess=True):
     '''
-    Tokenize the given sentence (already split into sentences) and applies 
-    preprocessing if requested (conversion to lower case and digit substitution).
+    Tokenize the given sentence and applies preprocessing if requested 
+    (conversion to lower case and digit substitution).
     '''
     if preprocess:
         text = re.sub(r'\d', '9', text.lower())
