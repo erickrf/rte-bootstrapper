@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import unicode_literals
-import utils
 
 '''
 Script to search for similar sentences, candidates to being RTE pairs.
@@ -14,19 +13,23 @@ making them non-trivial to classify correctly.
 
 import logging
 import re
+import os
 import argparse
+import cPickle
 import gensim
 
+import utils
 import rte_data
 from config import FileNames
-from corpusmanager import CorpusManager
+import corpusmanager
 
 class VectorSpaceAnalyzer(object):
     '''
     Class to analyze documents according to vector spaces.
     It evaluates document similarity in search of RTE candidates.
     '''
-    def __init__(self, corpus, load_data=False, stopwords=None, num_topics=100):
+    def __init__(self, corpus, load_data=False, method='lsi', stopwords=None, num_topics=100,
+                 load_dictionary=False):
         '''
         Constructor
         
@@ -36,22 +39,64 @@ class VectorSpaceAnalyzer(object):
             other parameters are ignored if this is True.
         :param stopwords: file with stopwords (one per line)
         :param num_topics: number of LSI topics (ignored if load_data is True)
+        :param load_dictionary: load a previously saved dictionary, but generate
+            a new VSM (only makes sense if load_data is False)
         '''
         if corpus is not None:
-            self.cm = CorpusManager(corpus)
-            self.using_corpus_manager = True
+            self.cm = corpusmanager.SentenceCorpusManager(corpus)
         
         if load_data:
             self._load_data()
         else:
-            self.create_dictionary(stopwords)
+            self.method = method
+            self.num_topics = num_topics
+            
+            if load_dictionary:
+                self.token_dict = gensim.corpora.Dictionary.load(FileNames.dictionary)
+            else:
+                self.create_dictionary(stopwords)
+            
             self.cm.set_yield_ids(self.token_dict)
-            self.create_tfidf_model()
-            self.create_lsi_model(num_topics)
-            self.create_index()
+            self.create_model()
+            self.save_metadata()
         
         self.ignored_docs = set()
-
+    
+    def save_metadata(self):
+        '''
+        Save metadata describing the VSA object.
+        '''
+        data = {'method': self.method, 
+                'num_topics': self.num_topics}
+        with open(FileNames.vsa_metadata, 'wb') as f:
+            cPickle.dump(data, f, -1)
+    
+    def create_model(self):
+        '''
+        Create the VSM used by this object.
+        '''
+        if self.method == 'lsi':
+            self.create_tfidf_model()
+            self.create_lsi_model()
+        elif self.method == 'lda':
+            # doesn't need TF-IDF
+            self.create_lda_model()
+        else:
+            raise ValueError('Unknown VSM method: {}'.format(self.method))
+    
+    def transform(self, bag_of_words):
+        '''
+        Transform the given bag of words in a vector space representation
+        according to the method used by this object.
+        '''
+        if self.method == 'lsi':
+            transformed_tfidf = self.tfidf[bag_of_words]
+            return self.lsi[transformed_tfidf]
+        elif self.method == 'lda':
+            return self.lda[bag_of_words]
+        else:
+            raise ValueError('Unknown VSM method: {}'.format(self.method))
+    
     def create_dictionary(self, stopwords_file=None, minimum_df=2):
         '''
         Try to load the dictionary if the given filename is not None.
@@ -105,10 +150,17 @@ class VectorSpaceAnalyzer(object):
         '''
         Load the models from default locations.
         '''
+        with open(FileNames.vsa_metadata, 'rb') as f:
+            metadata = cPickle.load(f)
+        self.__dict__.update(metadata)
+        
         self.token_dict = gensim.corpora.Dictionary.load(FileNames.dictionary)
-        self.tfidf = gensim.models.TfidfModel.load(FileNames.tfidf)
-        self.lsi = gensim.models.LsiModel.load(FileNames.lsi)
-        self.index = gensim.similarities.Similarity.load(FileNames.index)
+        
+        if self.method == 'lsi':
+            self.tfidf = gensim.models.TfidfModel.load(FileNames.tfidf)
+            self.lsi = gensim.models.LsiModel.load(FileNames.lsi)
+        elif self.method == 'lda':
+            self.lda = gensim.models.LdaModel.load(FileNames.lda)
     
     def create_tfidf_model(self):
         '''
@@ -117,31 +169,32 @@ class VectorSpaceAnalyzer(object):
         self.tfidf = gensim.models.TfidfModel(self.cm)
         self.tfidf.save(FileNames.tfidf)    
         
-    def create_lsi_model(self, num_topics):
+    def create_lsi_model(self):
         '''
         Create a LSI model from the corpus
         '''
         self.lsi = gensim.models.LsiModel(self.tfidf[self.cm], 
                                           id2word=self.token_dict, 
-                                          num_topics=num_topics)
+                                          num_topics=self.num_topics)
         self.lsi.save(FileNames.lsi)
     
-    def create_lda_model(self, num_topics):
+    def create_lda_model(self):
         '''
         Create a LDA model from the corpus
         '''
-        self.lda = gensim.models.LdaModel(self.tfidf[self.cm],
+        self.lda = gensim.models.LdaModel(self.cm,
                                           id2word=self.token_dict,
-                                          num_topics=num_topics)
+                                          num_topics=self.num_topics)
+        self.lda.save(FileNames.lda)
     
     def create_index(self):
         '''
         Create a similarity index to be used with the corpus.
         '''
-        tf_idf_corpus = self.tfidf[self.cm]
+        vsm_repr = self.transform(self.cm)
         self.index = gensim.similarities.Similarity('shard', 
-                                                    self.lsi[tf_idf_corpus],
-                                                    self.lsi.num_topics)
+                                                    self.lsi[vsm_repr],
+                                                    self.num_topics)
         
         self.index.save(FileNames.index)
     
@@ -154,14 +207,8 @@ class VectorSpaceAnalyzer(object):
         '''
         # create a bag of words from the document
         bow = self.token_dict.doc2bow(tokens)
-        
-        # create its tf-idf representation from the bag
-        tfidf_repr = self.tfidf[bow]
-        
-        # and LSI representation from the tf-idf one
-        lsi_repr = self.lsi[tfidf_repr]
-        
-        similarities = self.index[lsi_repr]
+        vsm_repr = self.transform(bow)
+        similarities = self.index[vsm_repr]
         
         # the similarities array contains the simliraty value for each document
         # we pick the indices in the order that would sort it
@@ -205,9 +252,9 @@ class VectorSpaceAnalyzer(object):
             that can't appear in the other
         '''
         scm.set_yield_ids(self.token_dict)
-        tfidf_repr = self.tfidf[scm]
-        lsi_repr = self.lsi[tfidf_repr]
-        index = gensim.similarities.MatrixSimilarity(lsi_repr, num_features=self.lsi.num_topics)
+        
+        vsm_repr = self.transform(scm)
+        index = gensim.similarities.MatrixSimilarity(vsm_repr, num_features=self.num_topics)
         
         # sentences already used to create pairs are ignored afterwards, in order 
         # to allow more variability
@@ -224,9 +271,8 @@ class VectorSpaceAnalyzer(object):
             base_tokens = utils.tokenize_sentence(base_sent)
             base_token_set = set(base_tokens)
             
-            tfidf_repr = self.tfidf[sent]
-            lsi_repr = self.lsi[tfidf_repr]
-            similarities = index[lsi_repr]
+            vsm_repr = self.transform(sent)
+            similarities = index[vsm_repr]
             
             # get the indices of the sentences with highest similarity
             # [::-1] revereses the order
@@ -236,16 +282,17 @@ class VectorSpaceAnalyzer(object):
             sentence_count = 0
             for arg in similarity_args:
                 similarity = similarities[arg]
-                if similarity < sent_threshold or similarity >= 0.99 or arg in ignored_sents:
-                    # too dissimilar, essentially the same sentence, or already used
+                if similarity < sent_threshold:
+                    # too dissimilar. since similarities are sorted, next ones will only be worse
+                    break
+                
+                if similarity >= 0.99 or arg in ignored_sents:
+                    # essentially the same sentence, or already used
                     continue
                 
                 other_sent = scm[arg]
                 other_tokens = utils.tokenize_sentence(other_sent)
                 
-#                 # splitting sentence in whitespace will yield the number of words in it
-#                 # we are only interested in filtering out short sentences
-#                 num_quasi_tokens = len(other_sent.split(' '))
                 if len(other_tokens) < 5:
                     continue
                 
@@ -276,102 +323,33 @@ class VectorSpaceAnalyzer(object):
         
         return candidate_pairs
     
-#     def find_rte_candidates_in_corpus(self, doc_num, doc_threshold=0.9, sent_threshold=0.8):
-#         '''
-#         Find and return RTE candidates from the n-th document in the collection
-#         '''
-#         if not self.using_corpus_manager:
-#             raise NotImplementedError('Can\'t use this function with MM corpus')
-#         
-#         doc_sentences = self.cm.get_sentences_from_file(doc_num)
-#         tokenized_doc_sentences = [utils.tokenize_sentence(sent)
-#                                    for sent in doc_sentences]
-#         all_tokens = [token
-#                       for sent in tokenized_doc_sentences
-#                       for token in sent]
-#         candidate_pairs = []
-#         
-#         similar_docs, scores = self.find_similar_documents(all_tokens, 5)
-#         for doc, score in zip(similar_docs, scores):
-#             if score < doc_threshold:
-#                 # when a score is below the threshold, we know the following ones
-#                 # will also be, because find_similar_documents returns an ordered list
-#                 break
-#             
-#             # these are tokenized to be used in find_similar_sentences
-#             similar_doc_sentences = self.cm.get_sentences_from_file(doc)
-#             tokenized_similar_sentences = [utils.tokenize_sentence(sent)
-#                                            for sent in similar_doc_sentences]
-#             
-#             for i, sent in enumerate(tokenized_doc_sentences):
-#                 # we are searching for sentences similar to our i-th doc sentence
-#                 sent_similarities = self.find_similar_sentences(sent, tokenized_similar_sentences, 5)
-#                 
-#                 for index, similar_score in zip(*sent_similarities):
-#                     if similar_score < sent_threshold:
-#                         break
-#                     
-#                     if similar_score >= 0.99:
-#                         # same sentence
-#                         continue
-#                     
-#                     base_sent = doc_sentences[i]
-#                     similar_sent = similar_doc_sentences[index]
-#                     pair = rte_data.Pair(base_sent, similar_sent, similarity=str(similar_score))
-#                     pair.set_t_attributes(document=str(doc_num))
-#                     pair.set_h_attributes(document=str(doc))
-#                     candidate_pairs.append(pair)
-#         
-#         return candidate_pairs
-            
-    
-    def find_similar_sentences(self, target_sentence, sentences, number=5,
-                               return_scores=True):
-        '''
-        Find and return similar sentences from the target one among all the
-        given sentences.
-        
-        :param target_sentence: a list of tokens
-        :param sentences: a list of lists of tokens (or something that
-            can yield lists of tokens when iterated)
-        :param number: number of sentences to find
-        :param return_scores: if True, return a tuple with the sentences
-            and their similarity scores
-        '''
-        sentences_bow = [self.token_dict.doc2bow(sent) for sent in sentences]
-        sentences_tfidf = self.tfidf[sentences_bow]
-        sentences_lsi = self.lsi[sentences_tfidf]
-        
-        # create an index over the given sentences
-        sentence_index = gensim.similarities.MatrixSimilarity(sentences_lsi, 
-                                                              num_features=self.lsi.num_topics)
-        
-        # now convert the target
-        bow = self.token_dict.doc2bow(target_sentence)
-        target_tfidf = self.tfidf[bow]
-        target_lsi = self.lsi[target_tfidf]
-        similarities = sentence_index[target_lsi]
-        
-        # get the indices of the most similar sentences
-        indices = similarities.argsort()[-number:][::-1]
-        
-        if return_scores:
-            return (indices, similarities[indices])
-        else:
-            return indices
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('corpus_dir', help='Directory containing corpus files')
     parser.add_argument('stopwords', help='Stopword file (one word per line)')
-    parser.add_argument('-n', dest='num_topics', help='Number of LSI topics (default 100)',
+    parser.add_argument('-n', dest='num_topics', help='Number of VSM topics (default 100)',
                         default=100)
     parser.add_argument('-q', help='Quiet mode; suppress logging', action='store_true',
                         dest='quiet')
+    parser.add_argument('method', help='Method to generate the vector space',
+                        choices=['lsi', 'lda'])
+    parser.add_argument('--load-dict', help='Load previously saved dictionary file', 
+                        action='store_true', dest='load_dictionary')
+    parser.add_argument('--dir', help='Set a directory to load and save models')
     args = parser.parse_args()
     
     if not args.quiet:
         logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', 
                             level=logging.INFO)
     
-    vsa = VectorSpaceAnalyzer(args.corpus_dir, False, args.stopwords, args.num_topics)
+    if args.dir is not None:
+        initial_dir = os.getcwd()
+        os.chdir(args.dir)
+    
+    vsa = VectorSpaceAnalyzer(args.corpus_dir, False, args.method, args.stopwords, 
+                              args.num_topics, args.load_dictionary)
+    
+    if args.dir is not None:
+        os.chdir(initial_dir)
+    

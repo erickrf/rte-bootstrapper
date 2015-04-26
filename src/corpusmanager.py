@@ -3,6 +3,7 @@
 
 import os
 import random
+import logging
 import nltk
 
 import utils
@@ -27,6 +28,12 @@ class CorpusManager(object):
         self.recursive = recursive
         self.yield_tokens = True
         self.files = os.listdir(self.directory)
+        
+        if recursive:
+            self.length = sum(len(files) for _, _, files in os.walk(self.directory))
+        else:
+            files = os.walk(self.directory)[2]
+            self.length = len(files)
     
     def set_yield_tokens(self):
         '''
@@ -47,14 +54,14 @@ class CorpusManager(object):
         '''
         Return the number of documents this corpus manager deals with.
         '''
-        return len(self.files)
+        return self.length
     
-    def __getitem__(self, index):
-        '''
-        Overload the [] operator. Return the i-th file in the observed directory.
-        Note that this is read only.
-        '''
-        return self.files[index]
+#     def __getitem__(self, index):
+#         '''
+#         Overload the [] operator. Return the i-th file in the observed directory.
+#         Note that this is read only.
+#         '''
+#         return self.files[index]
     
     def get_text_from_file(self, path):
         '''
@@ -131,16 +138,69 @@ class CorpusManager(object):
 
 class SentenceCorpusManager(CorpusManager):
     '''
+    This class provides one sentence at a time. Documents are split into sentences
+    on demand, but an initial run is needed in order to compute total corpus size.
+    '''
+    def __init__(self, directory, recursive=True):
+        CorpusManager.__init__(self, directory, recursive=recursive)
+        self.length = self._compute_length(self.directory)
+    
+    def _compute_length(self, root_dir):
+        '''
+        Compute the total number of sentences in all files inside `root_dir`.
+        If this object is set with recursive=True, all subdirectories are
+        explored.
+        '''
+        num_sents = 0
+        logging.info('Counting total number of sentences in directory {}'.format(root_dir))
+        for root, dirs, files in os.walk(root_dir):
+            for filename in files:
+                path = os.path.join(root, filename)
+                num_sents += len(self.get_sentences_from_file(path))
+            
+            if self.recursive:
+                for dirname in dirs:
+                    path = os.path.join(root, dirname)
+                    num_sents += self._compute_length(path)
+        
+        return num_sents
+    
+    def __len__(self):
+        return self.length
+    
+    def _iterate_on_dir(self, path):
+        '''
+        Internal helper recursive function.
+        '''
+        for filename in os.listdir(path):
+            full_path = os.path.join(path, filename)
+            if os.path.isdir(full_path):
+                if not self.recursive:
+                    continue
+                
+                for item in self._iterate_on_dir(full_path):
+                    yield item
+            else:
+                # this is a file
+                sentences = self.get_sentences_from_file(full_path)
+                for sentence in sentences:
+                    tokens = utils.tokenize_sentence(sentence, preprocess=True)
+                
+                    if self.yield_tokens:
+                        yield tokens
+                    else:
+                        yield self.dictionary.doc2bow(tokens)
+
+class InMemorySentenceCorpusManager(CorpusManager):
+    '''
     This class manages corpus access providing one sentence at a time.
     It must be used in a directory WITHOUT subdirectories.    
     
     This class stores all corpus content in memory, so it should only be used with small 
     corpora.
     '''
-    def __init__(self, directory):
-        CorpusManager.__init__(self, directory)
-        self._file_num = 0
-        self._sent_num = None
+    def __init__(self, directory, recursive=True):
+        CorpusManager.__init__(self, directory, recursive=recursive)
         self._load_corpus()
         
     def _load_corpus(self):

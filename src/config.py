@@ -10,3 +10,5 @@ class FileNames(object):
     tfidf = 'tfidf.dat'
     lsi = 'lsi.dat'
     index = 'index.dat'
+    lda = 'lda.dat'
+    vsa_metadata = 'vsa-metadata.dat'
