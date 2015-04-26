@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import unicode_literals
+import utils
 
 '''
 Script to search for similar sentences, candidates to being RTE pairs.
@@ -100,11 +101,6 @@ class VectorSpaceAnalyzer(object):
         
         self.token_dict.save(FileNames.dictionary)
     
-    def index_documents(self, documents):
-        '''
-        Create an index for the given documents.
-        '''
-    
     def _load_data(self):
         '''
         Load the models from default locations.
@@ -190,16 +186,23 @@ class VectorSpaceAnalyzer(object):
         else:
             return top_indices
     
-    def find_rte_candidates_in_cluster(self, scm=None, sent_threshold=0.8, pairs_per_sentence=1):
+    def find_rte_candidates_in_cluster(self, scm=None, sent_threshold=0.8, num_pairs=0, 
+                                       pairs_per_sentence=1,
+                                       minimum_sentence_diff=3,
+                                       minimum_proportion_diff=0.1):
         '''
         Find and return RTE candidates within the given documents.
         
         Each sentence is compared to all others.
         
-        :param scm: a SentenceCorpusManager object
+        :param scm: a SentenceCorpusManager object, containing a text cluster
         :param sent_threshold: threshold sentence similarity should be above in order
             to be considered RTE candidates
+        :param num_pairs: number of pairs to be extracted; 0 means indefinite
         :param pairs_per_sentence: number of pairs a sentence can be part of
+        :param minimum_sentence_diff: minimum number of tokens exclusive to each sentence
+        :param minimum_proportion_diff: minimum proportion of tokens in each sentence
+            that can't appear in the other
         '''
         scm.set_yield_ids(self.token_dict)
         tfidf_repr = self.tfidf[scm]
@@ -214,9 +217,13 @@ class VectorSpaceAnalyzer(object):
         for i, sent in enumerate(scm):
             if len(sent) < 5:
                 # discard very short sentences
+                # stopwords are pruned before this check
                 continue
             
             base_sent = scm[i]
+            base_tokens = utils.tokenize_sentence(base_sent)
+            base_token_set = set(base_tokens)
+            
             tfidf_repr = self.tfidf[sent]
             lsi_repr = self.lsi[tfidf_repr]
             similarities = index[lsi_repr]
@@ -234,17 +241,33 @@ class VectorSpaceAnalyzer(object):
                     continue
                 
                 other_sent = scm[arg]
+                other_tokens = utils.tokenize_sentence(other_sent)
                 
-                # splitting sentence in whitespace will yield the number of words in it
-                # we are only interested in filtering out short sentences
-                num_quasi_tokens = len(other_sent.split(' '))
-                if num_quasi_tokens < 5:
+#                 # splitting sentence in whitespace will yield the number of words in it
+#                 # we are only interested in filtering out short sentences
+#                 num_quasi_tokens = len(other_sent.split(' '))
+                if len(other_tokens) < 5:
+                    continue
+                
+                other_tokens_set = set(other_tokens)
+                # check the difference in the two ways
+                diff1 = base_token_set - other_tokens_set
+                diff2 = other_tokens_set - base_token_set
+                if len(diff1) < minimum_sentence_diff or len(diff2) < minimum_sentence_diff:
+                    continue
+                
+                proportion1 = len(diff1) / float(len(base_token_set))
+                proportion2 = len(diff2) / float(len(other_tokens_set))
+                if proportion1 < minimum_proportion_diff or proportion2 < minimum_proportion_diff:
                     continue
                 
                 pair = rte_data.Pair(base_sent, other_sent, similarity=str(similarity))
                 pair.set_t_attributes(sentence=str(i))
                 pair.set_h_attributes(sentence=str(arg))
                 candidate_pairs.append(pair)
+                
+                if len(candidate_pairs) == num_pairs:
+                    return candidate_pairs
                 
                 sentence_count += 1
                 if sentence_count >= pairs_per_sentence:

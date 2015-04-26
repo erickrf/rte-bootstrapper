@@ -2,7 +2,7 @@
 
 
 import os
-from collections import OrderedDict
+import random
 import nltk
 
 import utils
@@ -131,8 +131,8 @@ class CorpusManager(object):
 
 class SentenceCorpusManager(CorpusManager):
     '''
-    This class manages corpus access, and provides one sentence at a time.
-    It also supports indexing the n-th sentence of the m-th document.
+    This class manages corpus access providing one sentence at a time.
+    It must be used in a directory WITHOUT subdirectories.    
     
     This class stores all corpus content in memory, so it should only be used with small 
     corpora.
@@ -147,16 +147,16 @@ class SentenceCorpusManager(CorpusManager):
         '''
         Load the corpus to memory. Exactly repeated sentences are removed.
         '''
-        file_num_range = range(len(self.files))
-        
         # use a set to avoid repeated sentences
         corpus_sentences = set()
         
-        for i in file_num_range:
-            file_sentences = self.get_sentences_from_file(i)
+        for filename in os.listdir(self.directory):
+            path = os.path.join(self.directory, filename)
+            file_sentences = self.get_sentences_from_file(path)
             corpus_sentences.update(file_sentences)
         
         self.sentences = list(corpus_sentences)
+        random.shuffle(self.sentences)
     
     def __getitem__(self, index):
         return self.sentences[index]
@@ -191,11 +191,3 @@ class SentenceCorpusManager(CorpusManager):
 #         the current file), or None if the iteration hasn't started. 
 #         '''
 #         return self._sent_num
-    
-    def get_sentence(self, doc_num, sent_num):
-        '''
-        Return the n-th sentence from the m-th document, without
-        any pre-processing.
-        '''
-        doc_sents = self.get_sentences_from_file(doc_num)
-        return doc_sents[sent_num]
