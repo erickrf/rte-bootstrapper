@@ -37,6 +37,7 @@ class VectorSpaceAnalyzer(object):
             want to use saved models (LSI, TF-IDF).
         :param load_data: load data from previously saved files. The 
             other parameters are ignored if this is True.
+        :param method: the method used to create the VSM
         :param stopwords: file with stopwords (one per line)
         :param num_topics: number of LSI topics (ignored if load_data is True)
         :param load_dictionary: load a previously saved dictionary, but generate
@@ -81,6 +82,8 @@ class VectorSpaceAnalyzer(object):
         elif self.method == 'lda':
             # doesn't need TF-IDF
             self.create_lda_model()
+        elif self.method == 'rp':
+            self.create_rp_model()
         else:
             raise ValueError('Unknown VSM method: {}'.format(self.method))
     
@@ -94,6 +97,8 @@ class VectorSpaceAnalyzer(object):
             return self.lsi[transformed_tfidf]
         elif self.method == 'lda':
             return self.lda[bag_of_words]
+        elif self.method == 'rp':
+            return self.rp[bag_of_words]
         else:
             raise ValueError('Unknown VSM method: {}'.format(self.method))
     
@@ -161,7 +166,11 @@ class VectorSpaceAnalyzer(object):
             self.lsi = gensim.models.LsiModel.load(FileNames.lsi)
         elif self.method == 'lda':
             self.lda = gensim.models.LdaModel.load(FileNames.lda)
+        elif self.method == 'rp':
+            self.rp = gensim.models.RpModel.load(FileNames.rp)
     
+    # TODO: organize the following model creation functions avoiding repeated code
+    # (I'm unwilling to use setattr and getattr though) 
     def create_tfidf_model(self):
         '''
         Create a TF-IDF vector space model from the given data.
@@ -177,6 +186,15 @@ class VectorSpaceAnalyzer(object):
                                           id2word=self.token_dict, 
                                           num_topics=self.num_topics)
         self.lsi.save(FileNames.lsi)
+    
+    def create_rp_model(self):
+        '''
+        Create an RP model (Random Projections) 
+        '''
+        self.rp = gensim.models.RpModel(self.cm,
+                                        id2word=self.token_dict,
+                                        num_topics=self.num_topics)
+        self.rp.save(FileNames.rp)
     
     def create_lda_model(self):
         '''
@@ -333,7 +351,7 @@ if __name__ == '__main__':
     parser.add_argument('-q', help='Quiet mode; suppress logging', action='store_true',
                         dest='quiet')
     parser.add_argument('method', help='Method to generate the vector space',
-                        choices=['lsi', 'lda'])
+                        choices=['lsi', 'lda', 'rp'])
     parser.add_argument('--load-dict', help='Load previously saved dictionary file', 
                         action='store_true', dest='load_dictionary')
     parser.add_argument('--dir', help='Set a directory to load and save models')

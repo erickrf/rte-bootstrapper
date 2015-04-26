@@ -12,3 +12,4 @@ class FileNames(object):
     index = 'index.dat'
     lda = 'lda.dat'
     vsa_metadata = 'vsa-metadata.dat'
+    rp = 'rp.dat'
