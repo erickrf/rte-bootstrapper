@@ -13,14 +13,13 @@ making them non-trivial to classify correctly.
 
 import logging
 import re
-import os
 import argparse
 import cPickle
 import gensim
 
 import utils
 import rte_data
-from config import FileNames
+from config import FileAccess
 import corpusmanager
 
 class VectorSpaceAnalyzer(object):
@@ -28,48 +27,56 @@ class VectorSpaceAnalyzer(object):
     Class to analyze documents according to vector spaces.
     It evaluates document similarity in search of RTE candidates.
     '''
-    def __init__(self, corpus, load_data=False, method='lsi', stopwords=None, num_topics=100,
-                 load_dictionary=False):
+    def __init__(self):
         '''
-        Constructor
-        
-        :param corpus: directory containing corpus files or None if you only 
-            want to use saved models (LSI, TF-IDF).
-        :param load_data: load data from previously saved files. The 
-            other parameters are ignored if this is True.
-        :param method: the method used to create the VSM
-        :param stopwords: file with stopwords (one per line)
-        :param num_topics: number of LSI topics (ignored if load_data is True)
-        :param load_dictionary: load a previously saved dictionary, but generate
-            a new VSM (only makes sense if load_data is False)
+        Constructor. Call `generate_model` or `load_data` to do something 
+        useful with this class.
         '''
-        if corpus is not None:
-            self.cm = corpusmanager.SentenceCorpusManager(corpus)
-        
-        if load_data:
-            self._load_data()
-        else:
-            self.method = method
-            self.num_topics = num_topics
-            
-            if load_dictionary:
-                self.token_dict = gensim.corpora.Dictionary.load(FileNames.dictionary)
-            else:
-                self.create_dictionary(stopwords)
-            
-            self.cm.set_yield_ids(self.token_dict)
-            self.create_model()
-            self.save_metadata()
-        
         self.ignored_docs = set()
     
+    def generate_model(self, corpus, data_directory, method='lsi', load_dictionary=False, 
+                       stopwords=None, num_topics=100, **corpus_manager_args):
+        '''
+        Generate a VSM from the given corpus and save it to the given directory.
+        
+        :param corpus: directory containing corpus text files
+        :param data_directory: directory where models will be saved
+        :param method: the method used to create the VSM
+        :param stopwords: file with stopwords (one per line)
+        :param num_topics: number of VSM topics (ignored if method is hdp)
+        :param load_dictionary: load a previously saved dictionary
+        :param corpus_manager_args: named arguments supplied to the corpus manager
+            object created in this object.
+        '''
+        self.cm = corpusmanager.SentenceCorpusManager(corpus, 
+                                                      metadata_directory=data_directory, 
+                                                      **corpus_manager_args)
+        self.method = method
+        self.num_topics = num_topics
+        self.file_access = FileAccess(data_directory)
+        
+        if load_dictionary:
+            self.token_dict = gensim.corpora.Dictionary.load(self.file_access.dictionary)
+        else:
+            self.create_dictionary(stopwords)
+        
+        self.cm.set_yield_ids(self.token_dict)
+        self.create_model()
+        self.save_metadata()
+        if self.method == 'hdp':
+            # number of topics determined by the algorithm
+            # (pretty hard to find, by the way)
+            self.num_topics = self.hdp.m_lambda.shape[0]
+        
     def save_metadata(self):
         '''
         Save metadata describing the VSA object.
         '''
         data = {'method': self.method, 
                 'num_topics': self.num_topics}
-        with open(FileNames.vsa_metadata, 'wb') as f:
+        
+        filename = self.file_access.vsa_metadata
+        with open(filename, 'wb') as f:
             cPickle.dump(data, f, -1)
     
     def create_model(self):
@@ -84,6 +91,8 @@ class VectorSpaceAnalyzer(object):
             self.create_lda_model()
         elif self.method == 'rp':
             self.create_rp_model()
+        elif self.method == 'hdp':
+            self.create_hdp_model()
         else:
             raise ValueError('Unknown VSM method: {}'.format(self.method))
     
@@ -99,6 +108,8 @@ class VectorSpaceAnalyzer(object):
             return self.lda[bag_of_words]
         elif self.method == 'rp':
             return self.rp[bag_of_words]
+        elif self.method == 'hdp':
+            return self.hdp[bag_of_words]
         else:
             raise ValueError('Unknown VSM method: {}'.format(self.method))
     
@@ -149,25 +160,29 @@ class VectorSpaceAnalyzer(object):
         # reassign id's, in case tokens were deleted
         self.token_dict.compactify()
         
-        self.token_dict.save(FileNames.dictionary)
+        filename = self.file_access.dictionary
+        self.token_dict.save(filename)
     
-    def _load_data(self):
+    def load_data(self, directory):
         '''
-        Load the models from default locations.
+        Load the models from the given directory.
         '''
-        with open(FileNames.vsa_metadata, 'rb') as f:
+        file_access = FileAccess(directory)
+        with open(file_access.vsa_metadata, 'rb') as f:
             metadata = cPickle.load(f)
         self.__dict__.update(metadata)
         
-        self.token_dict = gensim.corpora.Dictionary.load(FileNames.dictionary)
+        self.token_dict = gensim.corpora.Dictionary.load(file_access.dictionary)
         
         if self.method == 'lsi':
-            self.tfidf = gensim.models.TfidfModel.load(FileNames.tfidf)
-            self.lsi = gensim.models.LsiModel.load(FileNames.lsi)
+            self.tfidf = gensim.models.TfidfModel.load(file_access.tfidf)
+            self.lsi = gensim.models.LsiModel.load(file_access.lsi)
         elif self.method == 'lda':
-            self.lda = gensim.models.LdaModel.load(FileNames.lda)
+            self.lda = gensim.models.LdaModel.load(file_access.lda)
         elif self.method == 'rp':
-            self.rp = gensim.models.RpModel.load(FileNames.rp)
+            self.rp = gensim.models.RpModel.load(file_access.rp)
+        elif self.method == 'hdp':
+            self.hdp = gensim.models.HdpModel.load(file_access.hdp)
     
     # TODO: organize the following model creation functions avoiding repeated code
     # (I'm unwilling to use setattr and getattr though) 
@@ -176,8 +191,14 @@ class VectorSpaceAnalyzer(object):
         Create a TF-IDF vector space model from the given data.
         '''
         self.tfidf = gensim.models.TfidfModel(self.cm)
-        self.tfidf.save(FileNames.tfidf)    
-        
+        filename = self.file_access.tfidf
+        self.tfidf.save(filename) 
+    
+    def create_hdp_model(self):
+        self.hdp = gensim.models.HdpModel(self.cm, id2word=self.token_dict)
+        filename = self.file_access.hdp
+        self.hdp.save(filename)
+    
     def create_lsi_model(self):
         '''
         Create a LSI model from the corpus
@@ -185,7 +206,8 @@ class VectorSpaceAnalyzer(object):
         self.lsi = gensim.models.LsiModel(self.tfidf[self.cm], 
                                           id2word=self.token_dict, 
                                           num_topics=self.num_topics)
-        self.lsi.save(FileNames.lsi)
+        filename = self.file_access.lsi
+        self.lsi.save(filename)
     
     def create_rp_model(self):
         '''
@@ -194,16 +216,19 @@ class VectorSpaceAnalyzer(object):
         self.rp = gensim.models.RpModel(self.cm,
                                         id2word=self.token_dict,
                                         num_topics=self.num_topics)
-        self.rp.save(FileNames.rp)
+        filename = self.file_access.rp
+        self.rp.save(filename)
     
     def create_lda_model(self):
         '''
         Create a LDA model from the corpus
         '''
-        self.lda = gensim.models.LdaModel(self.cm,
-                                          id2word=self.token_dict,
-                                          num_topics=self.num_topics)
-        self.lda.save(FileNames.lda)
+        self.lda = gensim.models.LdaMulticore(self.cm,
+                                              id2word=self.token_dict,
+                                              workers=3,
+                                              num_topics=self.num_topics)
+        filename = self.file_access.lda
+        self.lda.save(filename)
     
     def create_index(self):
         '''
@@ -213,8 +238,8 @@ class VectorSpaceAnalyzer(object):
         self.index = gensim.similarities.Similarity('shard', 
                                                     self.lsi[vsm_repr],
                                                     self.num_topics)
-        
-        self.index.save(FileNames.index)
+        filename = self.file_access.index
+        self.index.save(filename)
     
     def find_similar_documents(self, tokens, number=10, return_scores=True):
         '''
@@ -254,7 +279,7 @@ class VectorSpaceAnalyzer(object):
     def find_rte_candidates_in_cluster(self, scm=None, sent_threshold=0.8, num_pairs=0, 
                                        pairs_per_sentence=1,
                                        minimum_sentence_diff=3,
-                                       minimum_proportion_diff=0.1):
+                                       minimum_proportion_diff=0.2):
         '''
         Find and return RTE candidates within the given documents.
         
@@ -310,17 +335,17 @@ class VectorSpaceAnalyzer(object):
                 
                 other_sent = scm[arg]
                 other_tokens = utils.tokenize_sentence(other_sent)
-                
+                 
                 if len(other_tokens) < 5:
                     continue
-                
+                 
                 other_tokens_set = set(other_tokens)
                 # check the difference in the two ways
                 diff1 = base_token_set - other_tokens_set
                 diff2 = other_tokens_set - base_token_set
                 if len(diff1) < minimum_sentence_diff or len(diff2) < minimum_sentence_diff:
                     continue
-                
+                 
                 proportion1 = len(diff1) / float(len(base_token_set))
                 proportion2 = len(diff2) / float(len(other_tokens_set))
                 if proportion1 < minimum_proportion_diff or proportion2 < minimum_proportion_diff:
@@ -347,27 +372,25 @@ if __name__ == '__main__':
     parser.add_argument('corpus_dir', help='Directory containing corpus files')
     parser.add_argument('stopwords', help='Stopword file (one word per line)')
     parser.add_argument('-n', dest='num_topics', help='Number of VSM topics (default 100)',
-                        default=100)
+                        default=100, type=int)
     parser.add_argument('-q', help='Quiet mode; suppress logging', action='store_true',
                         dest='quiet')
     parser.add_argument('method', help='Method to generate the vector space',
-                        choices=['lsi', 'lda', 'rp'])
+                        choices=['lsi', 'lda', 'rp', 'hdp'])
+    parser.add_argument('--dir', help='Set a directory to load and save models')
     parser.add_argument('--load-dict', help='Load previously saved dictionary file', 
                         action='store_true', dest='load_dictionary')
-    parser.add_argument('--dir', help='Set a directory to load and save models')
+    parser.add_argument('--load-corpus-metadata', dest='load_corpus_metadata',
+                        action='store_true', 
+                        help='Load previously saved corpus metadata. Only used by the '\
+                        'SentenceCorpusManager')
     args = parser.parse_args()
     
     if not args.quiet:
         logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', 
                             level=logging.INFO)
     
-    if args.dir is not None:
-        initial_dir = os.getcwd()
-        os.chdir(args.dir)
-    
-    vsa = VectorSpaceAnalyzer(args.corpus_dir, False, args.method, args.stopwords, 
-                              args.num_topics, args.load_dictionary)
-    
-    if args.dir is not None:
-        os.chdir(initial_dir)
+    vsa = VectorSpaceAnalyzer()
+    vsa.generate_model(args.corpus_dir, args.dir, args.method, args.load_dictionary, 
+                       args.stopwords, args.num_topics, load_metadata=args.load_corpus_metadata)
     

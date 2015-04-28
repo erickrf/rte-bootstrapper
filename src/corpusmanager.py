@@ -4,9 +4,11 @@
 import os
 import random
 import logging
+import cPickle
 import nltk
 
 import utils
+from config import FileAccess
 
 class CorpusManager(object):
     '''
@@ -141,9 +143,28 @@ class SentenceCorpusManager(CorpusManager):
     This class provides one sentence at a time. Documents are split into sentences
     on demand, but an initial run is needed in order to compute total corpus size.
     '''
-    def __init__(self, directory, recursive=True):
-        CorpusManager.__init__(self, directory, recursive=recursive)
-        self.length = self._compute_length(self.directory)
+    def __init__(self, corpus_directory, recursive=True, 
+                 load_metadata=False, metadata_directory=None):
+        '''
+        :param load_metadata: whether to load previously saved metadata
+        :param metadata_directory: the directory where the metadata is stored.
+            If None, defaults to the current directory.
+        '''
+        CorpusManager.__init__(self, corpus_directory, recursive=recursive)
+        
+        file_acess = FileAccess(metadata_directory)
+        if load_metadata:
+            with open(file_acess.corpus_manager, 'rb') as f:
+                data = cPickle.load(f)
+            self.__dict__.update(data)
+            logging.info('Loaded corpus metadata from {}'.format(file_acess.corpus_manager))
+        else:
+            self.length = self._compute_length(self.directory)
+            data = {'length': self.length}
+            with open(file_acess.corpus_manager, 'wb') as f:
+                cPickle.dump(data, f, -1)
+            
+            logging.info('Saved corpus metadata to {}'.format(file_acess.corpus_manager))
     
     def _compute_length(self, root_dir):
         '''
@@ -163,6 +184,7 @@ class SentenceCorpusManager(CorpusManager):
                     path = os.path.join(root, dirname)
                     num_sents += self._compute_length(path)
         
+        logging.info('Found {} sentences'.format(num_sents))
         return num_sents
     
     def __len__(self):
@@ -194,10 +216,10 @@ class SentenceCorpusManager(CorpusManager):
 class InMemorySentenceCorpusManager(CorpusManager):
     '''
     This class manages corpus access providing one sentence at a time.
-    It must be used in a directory WITHOUT subdirectories.    
+    It must be used in a directory WITHOUT subdirectories.
     
-    This class stores all corpus content in memory, so it should only be used with small 
-    corpora.
+    This class stores all corpus content in memory, so it should only 
+    be used with small corpora.
     '''
     def __init__(self, directory, recursive=True):
         CorpusManager.__init__(self, directory, recursive=recursive)
@@ -238,16 +260,3 @@ class InMemorySentenceCorpusManager(CorpusManager):
         
         self._file_num = 0
         self._sent_num = None
-    
-#     def get_current_file(self):
-#         '''
-#         Return the number of the file currently being iterated over.
-#         '''
-#         return self._file_num
-#     
-#     def get_current_sentence(self):
-#         '''
-#         Return the number of the last sentence iterated over (within
-#         the current file), or None if the iteration hasn't started. 
-#         '''
-#         return self._sent_num
