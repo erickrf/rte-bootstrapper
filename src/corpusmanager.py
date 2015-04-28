@@ -2,9 +2,9 @@
 
 
 import os
-import random
 import logging
 import cPickle
+from collections import OrderedDict
 import nltk
 
 import utils
@@ -12,7 +12,7 @@ from config import FileAccess
 
 class CorpusManager(object):
     '''
-    Class to manage huge corpora. It iterates over the documents in a directory. 
+    Class to manage huge corpora. It iterates over the documents in a directory.
     '''
     
     def __init__(self, directory, recursive=True):
@@ -29,7 +29,6 @@ class CorpusManager(object):
         self.directory = unicode(directory)
         self.recursive = recursive
         self.yield_tokens = True
-        self.files = os.listdir(self.directory)
         
         if recursive:
             self.length = sum(len(files) for _, _, files in os.walk(self.directory))
@@ -113,7 +112,11 @@ class CorpusManager(object):
         '''
         Internal helper recursive function.
         '''
-        for filename in os.listdir(path):
+        # sort the list because os.listdir returns files in arbitrary order,
+        # and we want the result to be deterministic (in order to use the same
+        # index through multiple runs in the same corpus)
+        file_list = sorted(os.listdir(path))
+        for filename in file_list:
             full_path = os.path.join(path, filename)
             if os.path.isdir(full_path):
                 if not self.recursive:
@@ -133,7 +136,6 @@ class CorpusManager(object):
     def __iter__(self):
         '''
         Yield the text from a document inside the corpus directory.
-        Stopwords are filtered out.
         '''
         return self._iterate_on_dir(self.directory)
                 
@@ -158,6 +160,7 @@ class SentenceCorpusManager(CorpusManager):
                 data = cPickle.load(f)
             self.__dict__.update(data)
             logging.info('Loaded corpus metadata from {}'.format(file_acess.corpus_manager))
+            logging.info('{} total sentences'.format(self.length))
         else:
             self.length = self._compute_length(self.directory)
             data = {'length': self.length}
@@ -194,7 +197,9 @@ class SentenceCorpusManager(CorpusManager):
         '''
         Internal helper recursive function.
         '''
-        for filename in os.listdir(path):
+        # sorted file list like in the parent class
+        file_list = sorted(os.listdir(path))
+        for filename in file_list:
             full_path = os.path.join(path, filename)
             if os.path.isdir(full_path):
                 if not self.recursive:
@@ -220,25 +225,39 @@ class InMemorySentenceCorpusManager(CorpusManager):
     
     This class stores all corpus content in memory, so it should only 
     be used with small corpora.
+    
+    Only process .txt files. Any other extension is ignored.
     '''
-    def __init__(self, directory, recursive=True):
-        CorpusManager.__init__(self, directory, recursive=recursive)
+    def __init__(self, directory, recursive=False):
+        if recursive:
+            raise NotImplementedError('InMemorySentenceCorpusManager not implemented with recursion')
+    
+        self.directory = unicode(directory)
+        self.recursive = False
+        self.yield_tokens = True
         self._load_corpus()
         
     def _load_corpus(self):
         '''
         Load the corpus to memory. Exactly repeated sentences are removed.
         '''
-        # use a set to avoid repeated sentences
-        corpus_sentences = set()
+        # use an ordered dict as a set that mantains order
+        corpus_sentences = OrderedDict()
         
-        for filename in os.listdir(self.directory):
+        # sort file names, like in the parent class iterator
+        file_list = sorted(os.listdir(self.directory))
+        for filename in file_list:
+            
+            if not filename.endswith('.txt'):
+                continue
+            
             path = os.path.join(self.directory, filename)
             file_sentences = self.get_sentences_from_file(path)
-            corpus_sentences.update(file_sentences)
+            for sent in file_sentences:
+                if sent not in corpus_sentences:
+                    corpus_sentences[sent] = None
         
-        self.sentences = list(corpus_sentences)
-        random.shuffle(self.sentences)
+        self.sentences = corpus_sentences.keys()
     
     def __getitem__(self, index):
         return self.sentences[index]

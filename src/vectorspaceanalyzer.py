@@ -13,6 +13,7 @@ making them non-trivial to classify correctly.
 
 import logging
 import re
+import os
 import argparse
 import cPickle
 import gensim
@@ -62,11 +63,11 @@ class VectorSpaceAnalyzer(object):
         
         self.cm.set_yield_ids(self.token_dict)
         self.create_model()
-        self.save_metadata()
         if self.method == 'hdp':
             # number of topics determined by the algorithm
             # (pretty hard to find, by the way)
             self.num_topics = self.hdp.m_lambda.shape[0]
+        self.save_metadata()
         
     def save_metadata(self):
         '''
@@ -87,7 +88,7 @@ class VectorSpaceAnalyzer(object):
             self.create_tfidf_model()
             self.create_lsi_model()
         elif self.method == 'lda':
-            # doesn't need TF-IDF
+            self.create_tfidf_model()
             self.create_lda_model()
         elif self.method == 'rp':
             self.create_rp_model()
@@ -104,8 +105,11 @@ class VectorSpaceAnalyzer(object):
         if self.method == 'lsi':
             transformed_tfidf = self.tfidf[bag_of_words]
             return self.lsi[transformed_tfidf]
+        
         elif self.method == 'lda':
-            return self.lda[bag_of_words]
+            transformed_tfidf = self.tfidf[bag_of_words]
+            return self.lda[transformed_tfidf]
+        
         elif self.method == 'rp':
             return self.rp[bag_of_words]
         elif self.method == 'hdp':
@@ -178,6 +182,7 @@ class VectorSpaceAnalyzer(object):
             self.tfidf = gensim.models.TfidfModel.load(file_access.tfidf)
             self.lsi = gensim.models.LsiModel.load(file_access.lsi)
         elif self.method == 'lda':
+            self.tfidf = gensim.models.TfidfModel.load(file_access.tfidf)
             self.lda = gensim.models.LdaModel.load(file_access.lda)
         elif self.method == 'rp':
             self.rp = gensim.models.RpModel.load(file_access.rp)
@@ -276,16 +281,30 @@ class VectorSpaceAnalyzer(object):
         else:
             return top_indices
     
-    def find_rte_candidates_in_cluster(self, scm=None, sent_threshold=0.8, num_pairs=0, 
+    def create_index_for_cluster(self, cluster_dir):
+        '''
+        Create a gensim index file for the cluster in the given directory.
+        '''
+        scm = corpusmanager.InMemorySentenceCorpusManager(cluster_dir)
+        scm.set_yield_ids(self.token_dict)
+        vsm_repr = self.transform(scm)
+        index = gensim.similarities.MatrixSimilarity(vsm_repr, num_features=self.num_topics)
+        
+        index_filename = 'index-{}-{}.dat'.format(self.method, self.num_topics)
+        path = os.path.join(cluster_dir, index_filename)
+        index.save(path)
+    
+    def find_rte_candidates_in_cluster(self, corpus_dir, minimum_score=0.8, num_pairs=0, 
                                        pairs_per_sentence=1,
                                        minimum_sentence_diff=3,
-                                       minimum_proportion_diff=0.2):
+                                       minimum_proportion_diff=0.2,
+                                       maximum_score=0.99):
         '''
         Find and return RTE candidates within the given documents.
         
         Each sentence is compared to all others.
         
-        :param scm: a SentenceCorpusManager object, containing a text cluster
+        :param corpus_dir: the directory containing text files to be analyzed
         :param sent_threshold: threshold sentence similarity should be above in order
             to be considered RTE candidates
         :param num_pairs: number of pairs to be extracted; 0 means indefinite
@@ -294,10 +313,18 @@ class VectorSpaceAnalyzer(object):
         :param minimum_proportion_diff: minimum proportion of tokens in each sentence
             that can't appear in the other
         '''
+        scm = corpusmanager.InMemorySentenceCorpusManager(corpus_dir)
         scm.set_yield_ids(self.token_dict)
         
-        vsm_repr = self.transform(scm)
-        index = gensim.similarities.MatrixSimilarity(vsm_repr, num_features=self.num_topics)
+        try:
+            index_filename = 'index-{}-{}.dat'.format(self.method, self.num_topics)
+            path = os.path.join(corpus_dir, index_filename)
+            index = gensim.similarities.MatrixSimilarity.load(path)
+        except:
+            logging.warn('Index was not generated. If you intend to perform multiple experiments'\
+                         'on this cluster, consider indexing it first with the create_index method.')
+            vsm_repr = self.transform(scm)
+            index = gensim.similarities.MatrixSimilarity(vsm_repr, num_features=self.num_topics)
         
         # sentences already used to create pairs are ignored afterwards, in order 
         # to allow more variability
@@ -325,11 +352,11 @@ class VectorSpaceAnalyzer(object):
             sentence_count = 0
             for arg in similarity_args:
                 similarity = similarities[arg]
-                if similarity < sent_threshold:
+                if similarity < minimum_score:
                     # too dissimilar. since similarities are sorted, next ones will only be worse
                     break
                 
-                if similarity >= 0.99 or arg in ignored_sents:
+                if similarity >= maximum_score or arg in ignored_sents:
                     # essentially the same sentence, or already used
                     continue
                 
