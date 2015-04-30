@@ -13,28 +13,23 @@ from config import FileAccess
 class CorpusManager(object):
     '''
     Class to manage huge corpora. It iterates over the documents in a directory.
+    Documents are considered files whose names end with .txt.
+    Files in subdirectories are included.
     '''
     
-    def __init__(self, directory, recursive=True):
+    def __init__(self, directory):
         '''
         Constructor. By default, iterating over the corpus returns the tokens, 
         not their id's. Use `set_yield_ids` to change this behavior.
         cm.
         
         :param directory: the path to the directory containing the corpus
-        :param recursive: whether subdirectories should be accessed
         '''
         # use unicode to make functions from os module return unicode objects
         # this is important to get the correct filenames
         self.directory = unicode(directory)
-        self.recursive = recursive
         self.yield_tokens = True
-        
-        if recursive:
-            self.length = sum(len(files) for _, _, files in os.walk(self.directory))
-        else:
-            files = os.walk(self.directory)[2]
-            self.length = len(files)
+        self.length = sum(len(files) for _, _, files in os.walk(self.directory))
     
     def set_yield_tokens(self):
         '''
@@ -117,11 +112,11 @@ class CorpusManager(object):
         # index through multiple runs in the same corpus)
         file_list = sorted(os.listdir(path))
         for filename in file_list:
+            if not filename.endswith('.txt'):
+                continue
+            
             full_path = os.path.join(path, filename)
             if os.path.isdir(full_path):
-                if not self.recursive:
-                    continue
-                
                 for item in self._iterate_on_dir(full_path):
                     yield item
             else:
@@ -137,7 +132,9 @@ class CorpusManager(object):
         '''
         Yield the text from a document inside the corpus directory.
         '''
-        return self._iterate_on_dir(self.directory)
+#         return self._iterate_on_dir(self.directory)
+        for item in self._iterate_on_dir(self.directory):
+            yield item
                 
 
 class SentenceCorpusManager(CorpusManager):
@@ -145,14 +142,14 @@ class SentenceCorpusManager(CorpusManager):
     This class provides one sentence at a time. Documents are split into sentences
     on demand, but an initial run is needed in order to compute total corpus size.
     '''
-    def __init__(self, corpus_directory, recursive=True, 
+    def __init__(self, corpus_directory,
                  load_metadata=False, metadata_directory=None):
         '''
         :param load_metadata: whether to load previously saved metadata
         :param metadata_directory: the directory where the metadata is stored.
             If None, defaults to the current directory.
         '''
-        CorpusManager.__init__(self, corpus_directory, recursive=recursive)
+        CorpusManager.__init__(self, corpus_directory)
         
         file_acess = FileAccess(metadata_directory)
         if load_metadata:
@@ -172,20 +169,16 @@ class SentenceCorpusManager(CorpusManager):
     def _compute_length(self, root_dir):
         '''
         Compute the total number of sentences in all files inside `root_dir`.
-        If this object is set with recursive=True, all subdirectories are
-        explored.
         '''
         num_sents = 0
         logging.info('Counting total number of sentences in directory {}'.format(root_dir))
-        for root, dirs, files in os.walk(root_dir):
+        for root, _, files in os.walk(root_dir):
             for filename in files:
+                if not filename.endswith('.txt'):
+                    continue
+                
                 path = os.path.join(root, filename)
                 num_sents += len(self.get_sentences_from_file(path))
-            
-            if self.recursive:
-                for dirname in dirs:
-                    path = os.path.join(root, dirname)
-                    num_sents += self._compute_length(path)
         
         logging.info('Found {} sentences'.format(num_sents))
         return num_sents
@@ -202,13 +195,13 @@ class SentenceCorpusManager(CorpusManager):
         for filename in file_list:
             full_path = os.path.join(path, filename)
             if os.path.isdir(full_path):
-                if not self.recursive:
-                    continue
-                
                 for item in self._iterate_on_dir(full_path):
                     yield item
             else:
                 # this is a file
+                if not filename.endswith('.txt'):
+                    continue
+                
                 sentences = self.get_sentences_from_file(full_path)
                 for sentence in sentences:
                     tokens = utils.tokenize_sentence(sentence, preprocess=True)
@@ -228,12 +221,8 @@ class InMemorySentenceCorpusManager(CorpusManager):
     
     Only process .txt files. Any other extension is ignored.
     '''
-    def __init__(self, directory, recursive=False):
-        if recursive:
-            raise NotImplementedError('InMemorySentenceCorpusManager not implemented with recursion')
-    
+    def __init__(self, directory):
         self.directory = unicode(directory)
-        self.recursive = False
         self.yield_tokens = True
         self._load_corpus()
         

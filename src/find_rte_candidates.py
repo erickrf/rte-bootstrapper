@@ -41,7 +41,6 @@ if __name__ == '__main__':
     # iterate over the clusters
     for cluster in os.listdir(args.clusters):
         cluster_path = os.path.join(args.clusters, cluster)
-#         scm = InMemorySentenceCorpusManager(cluster_path)
         pairs.extend(vsa.find_rte_candidates_in_cluster(cluster_path, minimum_score=args.min_score,
                                                         maximum_score=args.max_score,
                                                         num_pairs=args.cluster_pairs, 
