@@ -23,9 +23,9 @@ if __name__ == '__main__':
                         default=0.99, dest='max_score')
     parser.add_argument('--cluster-pairs', help='Candidate pairs per cluster', type=int,
                         default=2)
-    parser.add_argument('--min-diff', help='Minimum number of different tokens', type=int,
-                        default=3, dest='min_diff')
-    parser.add_argument('--min-proportion-diff', type=float, default=0.3, dest='min_proportion_diff',
+    parser.add_argument('--absolute-alpha', help='Minimum number of different tokens', type=int,
+                        default=3, dest='absolute_alpha')
+    parser.add_argument('--alpha', type=float, default=0.3, dest='alpha',
                         help='Minimum proportion of tokens exclusive to each sentence')
     parser.add_argument('-o', '--output', help='File to save the pairs', default='rte.xml')
     
@@ -45,7 +45,7 @@ if __name__ == '__main__':
                                                         maximum_score=args.max_score,
                                                         num_pairs=args.cluster_pairs, 
                                                         pairs_per_sentence=1, 
-                                                        minimum_sentence_diff=args.min_diff,
-                                                        minimum_proportion_diff=args.min_proportion_diff))
+                                                        alpha=args.alpha,
+                                                        absolute_alpha=args.absolute_alpha))
 
         write_rte_file(args.output, pairs)

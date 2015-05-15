@@ -117,7 +117,7 @@ class VectorSpaceAnalyzer(object):
         else:
             raise ValueError('Unknown VSM method: {}'.format(self.method))
     
-    def create_dictionary(self, stopwords_file=None, minimum_df=2):
+    def create_dictionary(self, stopwords_file=None):
         '''
         Try to load the dictionary if the given filename is not None.
         If it is, create from the corpus.
@@ -151,15 +151,11 @@ class VectorSpaceAnalyzer(object):
                      for token in self.token_dict.token2id 
                      if re.match('\W+$', token)]
         
-        # remove rare tokens
-        rare_ids = [token_id 
-                    for token_id, docfreq in self.token_dict.dfs.iteritems() 
-                    if docfreq < minimum_df]
+        self.token_dict.filter_tokens(punct_ids)
         
-        self.token_dict.filter_tokens(punct_ids + rare_ids)
-        
-        # remove common tokens (appearing in more than 90% of the docs)
-        self.token_dict.filter_extremes(no_above=0.9)
+        # remove common and rare tokens (gensim by default filters out words 
+        # appearing in less than 5 or more than 50% of the documents)
+        self.token_dict.filter_extremes(no_below=20, keep_n=50000)
         
         # reassign id's, in case tokens were deleted
         self.token_dict.compactify()
@@ -222,15 +218,15 @@ class VectorSpaceAnalyzer(object):
                                         id2word=self.token_dict,
                                         num_topics=self.num_topics)
         filename = self.file_access.rp
-        self.rp.save(filename)
+        self.rp.save(filename, [])
     
     def create_lda_model(self):
         '''
         Create a LDA model from the corpus
         '''
-        self.lda = gensim.models.LdaMulticore(self.cm,
+        self.lda = gensim.models.LdaModel(self.cm,
                                               id2word=self.token_dict,
-                                              workers=3,
+                                         
                                               num_topics=self.num_topics)
         filename = self.file_access.lda
         self.lda.save(filename)
@@ -296,8 +292,8 @@ class VectorSpaceAnalyzer(object):
     
     def find_rte_candidates_in_cluster(self, corpus_dir, minimum_score=0.8, num_pairs=0, 
                                        pairs_per_sentence=1,
-                                       minimum_sentence_diff=3,
-                                       minimum_proportion_diff=0.2,
+                                       absolute_alpha=3,
+                                       alpha=0.2,
                                        maximum_score=0.99):
         '''
         Find and return RTE candidates within the given documents.
@@ -370,15 +366,16 @@ class VectorSpaceAnalyzer(object):
                 # check the difference in the two ways
                 diff1 = base_token_set - other_tokens_set
                 diff2 = other_tokens_set - base_token_set
-                if len(diff1) < minimum_sentence_diff or len(diff2) < minimum_sentence_diff:
+                if len(diff1) < absolute_alpha or len(diff2) < absolute_alpha:
                     continue
                  
                 proportion1 = len(diff1) / float(len(base_token_set))
                 proportion2 = len(diff2) / float(len(other_tokens_set))
-                if proportion1 < minimum_proportion_diff or proportion2 < minimum_proportion_diff:
+                if proportion1 < alpha or proportion2 < alpha:
                     continue
                 
-                pair = rte_data.Pair(base_sent, other_sent, similarity=str(similarity))
+                pair = rte_data.Pair(base_sent, other_sent, similarity=str(similarity),
+                                     alpha1=str(proportion1), alpha2=str(proportion2))
                 pair.set_t_attributes(sentence=str(i))
                 pair.set_h_attributes(sentence=str(arg))
                 candidate_pairs.append(pair)

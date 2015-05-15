@@ -132,7 +132,6 @@ class CorpusManager(object):
         '''
         Yield the text from a document inside the corpus directory.
         '''
-#         return self._iterate_on_dir(self.directory)
         for item in self._iterate_on_dir(self.directory):
             yield item
                 
