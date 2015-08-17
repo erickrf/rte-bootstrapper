@@ -292,8 +292,8 @@ class VectorSpaceAnalyzer(object):
     
     def find_rte_candidates_in_cluster(self, corpus_dir, minimum_score=0.8, num_pairs=0, 
                                        pairs_per_sentence=1,
-                                       absolute_alpha=3,
-                                       alpha=0.2,
+                                       absolute_min_alpha=3,
+                                       min_alpha=0.2, max_alpha=1,
                                        maximum_score=0.99):
         '''
         Find and return RTE candidates within the given documents.
@@ -301,12 +301,16 @@ class VectorSpaceAnalyzer(object):
         Each sentence is compared to all others.
         
         :param corpus_dir: the directory containing text files to be analyzed
-        :param sent_threshold: threshold sentence similarity should be above in order
+        :param minimum_score: threshold sentence similarity should be above in order
+            to be considered RTE candidates
+        :param maximum_score: threshold sentence similarity should be below in order
             to be considered RTE candidates
         :param num_pairs: number of pairs to be extracted; 0 means indefinite
         :param pairs_per_sentence: number of pairs a sentence can be part of
-        :param minimum_sentence_diff: minimum number of tokens exclusive to each sentence
-        :param minimum_proportion_diff: minimum proportion of tokens in each sentence
+        :param absolute_min_alpha: minimum number of tokens exclusive to each sentence
+        :param min_alpha: minimum proportion of tokens in each sentence
+            that can't appear in the other
+        :param max_alpha: maximum proportion of tokens in each sentence
             that can't appear in the other
         '''
         scm = corpusmanager.InMemorySentenceCorpusManager(corpus_dir)
@@ -366,12 +370,15 @@ class VectorSpaceAnalyzer(object):
                 # check the difference in the two ways
                 diff1 = base_token_set - other_tokens_set
                 diff2 = other_tokens_set - base_token_set
-                if len(diff1) < absolute_alpha or len(diff2) < absolute_alpha:
+                if len(diff1) < absolute_min_alpha or len(diff2) < absolute_min_alpha:
                     continue
                  
                 proportion1 = len(diff1) / float(len(base_token_set))
                 proportion2 = len(diff2) / float(len(other_tokens_set))
-                if proportion1 < alpha or proportion2 < alpha:
+                if proportion1 < min_alpha or proportion2 < min_alpha:
+                    continue
+                
+                if proportion1 > max_alpha or proportion2 > max_alpha:
                     continue
                 
                 pair = rte_data.Pair(base_sent, other_sent, similarity=str(similarity),
