@@ -290,20 +290,21 @@ class VectorSpaceAnalyzer(object):
         path = os.path.join(cluster_dir, index_filename)
         index.save(path)
     
-    def find_rte_candidates_in_cluster(self, corpus_dir, minimum_score=0.8, num_pairs=0, 
+    def find_rte_candidates_in_cluster(self, corpus_dir, min_score=0.8, num_pairs=0, 
                                        pairs_per_sentence=1,
                                        absolute_min_alpha=3,
                                        min_alpha=0.2, max_alpha=1,
-                                       maximum_score=0.99):
+                                       max_score=0.99,
+                                       max_t_size=0, max_h_size=0):
         '''
         Find and return RTE candidates within the given documents.
         
         Each sentence is compared to all others.
         
         :param corpus_dir: the directory containing text files to be analyzed
-        :param minimum_score: threshold sentence similarity should be above in order
+        :param min_score: threshold sentence similarity should be above in order
             to be considered RTE candidates
-        :param maximum_score: threshold sentence similarity should be below in order
+        :param max_score: threshold sentence similarity should be below in order
             to be considered RTE candidates
         :param num_pairs: number of pairs to be extracted; 0 means indefinite
         :param pairs_per_sentence: number of pairs a sentence can be part of
@@ -312,6 +313,8 @@ class VectorSpaceAnalyzer(object):
             that can't appear in the other
         :param max_alpha: maximum proportion of tokens in each sentence
             that can't appear in the other
+        :param max_t_size: maximum size (in tokens) of the first sentence in the pair
+        :param max_h_size: maximum size (in tokens) of the second sentence in the pair
         '''
         scm = corpusmanager.InMemorySentenceCorpusManager(corpus_dir)
         scm.set_yield_ids(self.token_dict)
@@ -341,6 +344,10 @@ class VectorSpaceAnalyzer(object):
             base_tokens = utils.tokenize_sentence(base_sent)
             base_token_set = set(base_tokens)
             
+            if max_t_size > 0 and len(base_tokens) > max_t_size:
+                # discard long sentences (considering stop words)
+                continue
+            
             vsm_repr = self.transform(sent)
             similarities = index[vsm_repr]
             
@@ -352,11 +359,11 @@ class VectorSpaceAnalyzer(object):
             sentence_count = 0
             for arg in similarity_args:
                 similarity = similarities[arg]
-                if similarity < minimum_score:
+                if similarity < min_score:
                     # too dissimilar. since similarities are sorted, next ones will only be worse
                     break
                 
-                if similarity >= maximum_score or arg in ignored_sents:
+                if similarity >= max_score or arg in ignored_sents:
                     # essentially the same sentence, or already used
                     continue
                 
@@ -364,6 +371,10 @@ class VectorSpaceAnalyzer(object):
                 other_tokens = utils.tokenize_sentence(other_sent)
                  
                 if len(other_tokens) < 5:
+                    continue
+                
+                if max_h_size > 0 and len(other_tokens) > max_h_size:
+                    # discard long sentences (considering stop words)
                     continue
                  
                 other_tokens_set = set(other_tokens)

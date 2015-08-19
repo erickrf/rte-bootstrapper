@@ -8,7 +8,6 @@ import os
 import logging
 import argparse
 
-from corpusmanager import InMemorySentenceCorpusManager
 from rte_data import write_rte_file
 from vectorspaceanalyzer import VectorSpaceAnalyzer
 
@@ -29,6 +28,10 @@ if __name__ == '__main__':
                         help='Minimum proportion of tokens exclusive to each sentence (default: 0.3)')
     parser.add_argument('--max-alpha', type=float, default=1, dest='max_alpha',
                         help='Maximum proportion of tokens exclusive to each sentence (default: 1)')
+    parser.add_argument('--max-t-size', type=int, default=0, dest='max_t_size',
+                        help='Maximum T size (first component in each pair)')
+    parser.add_argument('--max-h-size', type=int, default=0, dest='max_h_size',
+                        help='Maximum H size (second component in each pair)')
     parser.add_argument('-o', '--output', help='File to save the pairs', default='rte.xml')
     
     args = parser.parse_args()
@@ -44,13 +47,15 @@ if __name__ == '__main__':
     for cluster in os.listdir(args.clusters):
         cluster_path = os.path.join(args.clusters, cluster)
         new_pairs = vsa.find_rte_candidates_in_cluster(cluster_path, 
-                                                       minimum_score=args.min_score,
-                                                       maximum_score=args.max_score,
+                                                       min_score=args.min_score,
+                                                       max_score=args.max_score,
                                                        num_pairs=args.cluster_pairs, 
                                                        pairs_per_sentence=1, 
                                                        min_alpha=args.min_alpha,
                                                        max_alpha=args.max_alpha,
-                                                       absolute_min_alpha=args.absolute_alpha)
+                                                       absolute_min_alpha=args.absolute_alpha,
+                                                       max_t_size=args.max_t_size,
+                                                       max_h_size=args.max_h_size)
         pairs.extend(new_pairs)
         
         # write within loop so partial results are visible
