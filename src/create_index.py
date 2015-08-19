@@ -7,12 +7,13 @@ of all files contained in a directory.
 
 import argparse
 import logging
+import os
 
 from vectorspaceanalyzer import VectorSpaceAnalyzer
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('corpus_dir', help='Directory with files where index will be created')
+    parser.add_argument('corpus_dir', help='Directory with clusters. Files in each one will be indexed.')
     parser.add_argument('vsa_dir', help='Directory containing saved Vector Space Analyzer')
     args = parser.parse_args()
     
@@ -20,4 +21,8 @@ if __name__ == '__main__':
                         level=logging.INFO)
     vsa = VectorSpaceAnalyzer()
     vsa.load_data(args.vsa_dir)
-    vsa.create_index_for_cluster(args.corpus_dir)
+    
+    for item in os.listdir(args.corpus_dir):
+        path = os.path.join(args.corpus_dir, item)
+        if os.path.isdir(path):
+            vsa.create_index_for_cluster(path)
