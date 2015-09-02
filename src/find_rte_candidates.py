@@ -10,6 +10,7 @@ import argparse
 
 from rte_data import write_rte_file
 from vectorspaceanalyzer import VectorSpaceAnalyzer
+import utils
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
@@ -32,6 +33,9 @@ if __name__ == '__main__':
                         help='Maximum T size (first component in each pair)')
     parser.add_argument('--max-h-size', type=int, default=0, dest='max_h_size',
                         help='Maximum H size (second component in each pair)')
+    parser.add_argument('--filter-prefixes', default=None,
+                        help='Text file containing in each line a "prefix". Sentences starting with any\
+                        of the prefixes are filtered out.')
     parser.add_argument('-o', '--output', help='File to save the pairs', default='rte.xml')
     
     args = parser.parse_args()
@@ -42,20 +46,26 @@ if __name__ == '__main__':
     vsa = VectorSpaceAnalyzer()
     vsa.load_data(args.vsm)
     pairs = []
-
+    
+    prefixes = utils.read_lines(args.filter_prefixes)
+    filter_ = utils.generate_filter(True, prefixes)
+    
     # iterate over the clusters
     for cluster in os.listdir(args.clusters):
         cluster_path = os.path.join(args.clusters, cluster)
         new_pairs = vsa.find_rte_candidates_in_cluster(cluster_path, 
                                                        min_score=args.min_score,
                                                        max_score=args.max_score,
-                                                       num_pairs=args.cluster_pairs, 
-                                                       pairs_per_sentence=1, 
+                                                       num_pairs=args.cluster_pairs,
                                                        min_alpha=args.min_alpha,
                                                        max_alpha=args.max_alpha,
                                                        absolute_min_alpha=args.absolute_alpha,
+                                                       min_t_size=7,
+                                                       min_h_size=7,
                                                        max_t_size=args.max_t_size,
-                                                       max_h_size=args.max_h_size)
+                                                       max_h_size=args.max_h_size,
+                                                       filter_out_h=filter_,
+                                                       filter_out_t=filter_)
         pairs.extend(new_pairs)
         
         # write within loop so partial results are visible

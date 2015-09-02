@@ -290,12 +290,14 @@ class VectorSpaceAnalyzer(object):
         path = os.path.join(cluster_dir, index_filename)
         index.save(path)
     
-    def find_rte_candidates_in_cluster(self, corpus_dir, min_score=0.8, num_pairs=0, 
-                                       pairs_per_sentence=1,
+    def find_rte_candidates_in_cluster(self, corpus_dir, min_score=0.8, num_pairs=0,
                                        absolute_min_alpha=3,
                                        min_alpha=0.2, max_alpha=1,
                                        max_score=0.99,
-                                       max_t_size=0, max_h_size=0):
+                                       min_t_size=5, min_h_size=5,
+                                       max_t_size=0, max_h_size=0,
+                                       filter_out_t=lambda _: False,
+                                       filter_out_h=lambda _: False):
         '''
         Find and return RTE candidates within the given documents.
         
@@ -307,7 +309,6 @@ class VectorSpaceAnalyzer(object):
         :param max_score: threshold sentence similarity should be below in order
             to be considered RTE candidates
         :param num_pairs: number of pairs to be extracted; 0 means indefinite
-        :param pairs_per_sentence: number of pairs a sentence can be part of
         :param absolute_min_alpha: minimum number of tokens exclusive to each sentence
         :param min_alpha: minimum proportion of tokens in each sentence
             that can't appear in the other
@@ -315,9 +316,12 @@ class VectorSpaceAnalyzer(object):
             that can't appear in the other
         :param max_t_size: maximum size (in tokens) of the first sentence in the pair
         :param max_h_size: maximum size (in tokens) of the second sentence in the pair
+        :param filter_out_t: customized function to filter out T sentences 
+            (should return True if the sentence should be discarded)
+        :param filter_out_h: same as filter_out_t, but for H
         '''
         scm = corpusmanager.InMemorySentenceCorpusManager(corpus_dir)
-        scm.set_yield_ids(self.token_dict)
+        scm.set_yield_tokens()
         
         try:
             index_filename = 'index-{}-{}.dat'.format(self.method, self.num_topics)
@@ -334,58 +338,73 @@ class VectorSpaceAnalyzer(object):
         ignored_sents = set()
         candidate_pairs = []
         
-        for i, sent in enumerate(scm):
-            if len(sent) < 5:
-                # discard very short sentences
-                # stopwords are pruned before this check
+        for i, base_tokens in enumerate(scm):
+            base_sent = scm[i]
+            if filter_out_t(base_sent):
+                # drop sentences without ending punctuation
+                # this filters out titles and image subtitles
                 continue
             
-            base_sent = scm[i]
-            base_tokens = utils.tokenize_sentence(base_sent)
-            base_token_set = set(base_tokens)
+            if base_sent in ignored_sents:
+                continue
+            
+            # this set actually contains the tokens except for stopwords
+            base_content_words = set(token
+                                     for token in base_tokens
+                                     if token in self.token_dict.token2id)
+            
+            if len(base_tokens) < min_t_size:
+                # discard very short sentences
+                continue
             
             if max_t_size > 0 and len(base_tokens) > max_t_size:
                 # discard long sentences (considering stop words)
                 continue
             
-            vsm_repr = self.transform(sent)
+            bow = self.token_dict.doc2bow(base_tokens)
+            vsm_repr = self.transform(bow)
             similarities = index[vsm_repr]
             
             # get the indices of the sentences with highest similarity
             # [::-1] revereses the order
             similarity_args = similarities.argsort()[::-1]
             
-            # counter to limit the number of pairs per sentence 
-            sentence_count = 0
             for arg in similarity_args:
                 similarity = similarities[arg]
                 if similarity < min_score:
                     # too dissimilar. since similarities are sorted, next ones will only be worse
                     break
                 
-                if similarity >= max_score or arg in ignored_sents:
-                    # essentially the same sentence, or already used
+                if similarity >= max_score:
+                    # essentially the same sentence
                     continue
                 
                 other_sent = scm[arg]
-                other_tokens = utils.tokenize_sentence(other_sent)
+                other_tokens = scm.get_tokenized_sentence(arg)
+                if filter_out_h(other_sent):
+                    continue
+                if other_sent in ignored_sents:
+                    continue
                  
-                if len(other_tokens) < 5:
+                if len(other_tokens) < min_h_size:
                     continue
                 
                 if max_h_size > 0 and len(other_tokens) > max_h_size:
                     # discard long sentences (considering stop words)
                     continue
                  
-                other_tokens_set = set(other_tokens)
+                other_sent_content_words = set(token
+                                               for token in other_tokens
+                                               if token in self.token_dict.token2id)
+                
                 # check the difference in the two ways
-                diff1 = base_token_set - other_tokens_set
-                diff2 = other_tokens_set - base_token_set
+                diff1 = base_content_words - other_sent_content_words
+                diff2 = other_sent_content_words - base_content_words
                 if len(diff1) < absolute_min_alpha or len(diff2) < absolute_min_alpha:
                     continue
                  
-                proportion1 = len(diff1) / float(len(base_token_set))
-                proportion2 = len(diff2) / float(len(other_tokens_set))
+                proportion1 = len(diff1) / float(len(base_content_words))
+                proportion2 = len(diff2) / float(len(other_sent_content_words))
                 if proportion1 < min_alpha or proportion2 < min_alpha:
                     continue
                 
@@ -401,10 +420,8 @@ class VectorSpaceAnalyzer(object):
                 if len(candidate_pairs) == num_pairs:
                     return candidate_pairs
                 
-                sentence_count += 1
-                if sentence_count >= pairs_per_sentence:
-                    ignored_sents.add(i)
-                    break
+                ignored_sents.add(base_sent)
+                ignored_sents.add(other_sent)
         
         return candidate_pairs
     

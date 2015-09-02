@@ -246,6 +246,21 @@ class InMemorySentenceCorpusManager(CorpusManager):
                     corpus_sentences[sent] = None
         
         self.sentences = corpus_sentences.keys()
+        self.tokenized_cache = {}
+    
+    def get_tokenized_sentence(self, index):
+        '''
+        Return the sentence in the position indicated by the index properly tokenized.
+        A cache is used to store sentences from the corpus previously tokenized.
+        '''
+        if index in self.tokenized_cache:
+            return self.tokenized_cache[index]
+        
+        sentence = self[index]
+        tokens = utils.tokenize_sentence(sentence)
+        self.tokenized_cache[index] = tokens
+        
+        return tokens
     
     def __getitem__(self, index):
         return self.sentences[index]
@@ -257,9 +272,9 @@ class InMemorySentenceCorpusManager(CorpusManager):
         '''
         Yield sentences.
         '''
-        for sent in self.sentences:
+        for i, _ in enumerate(self.sentences):
             
-            tokens = utils.tokenize_sentence(sent)
+            tokens = self.get_tokenized_sentence(i)
             if self.yield_tokens:
                 yield tokens
             else:

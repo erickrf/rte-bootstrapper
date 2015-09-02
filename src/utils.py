@@ -5,8 +5,51 @@ Utility functions.
 '''
 
 import re
-
 from nltk.tokenize.regexp import RegexpTokenizer
+
+def generate_filter(ending_without_punctuation=False, starting_with=None):
+    '''
+    Generate and return a filter function with the provided requirements.
+    
+    :param ending_without_punctuation: boolean indicating to discard sentences
+        without trailing ".", "?" or "!"
+    :param starting_with: list of strings. Sentences starting with any of those
+        are discarded.
+    '''
+#     if without_verb:
+#         tagger = nlpnet.POSTagger(config.nlpnet_model, 'pt')
+    
+    def filter_out(sentence):
+        if ending_without_punctuation and sentence[-1] not in '.!?':
+            return True
+        
+        if starting_with is not None:
+            for substring in starting_with:
+                if sentence.startswith(substring):
+                    return True
+        
+#         if without_verb:
+#             tagged = tagger.tag(sentence)
+#             has_verb = any((tag == 'V' or tag == 'PCP')
+#                            for _, tag in tagged)
+#             if not has_verb:
+#                 return True            
+        
+        return False
+    
+    return filter_out
+
+def read_lines(filename):
+    '''
+    Read the file with the given name and return a list containing all lines in it.
+    '''
+    if filename is None:
+        return None
+    
+    with open(filename, 'rb') as f:
+        text = unicode(f.read(), 'utf-8')
+    
+    return text.splitlines()
 
 def detokenize(tokens):
     '''
