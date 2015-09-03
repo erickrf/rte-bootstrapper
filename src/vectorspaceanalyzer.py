@@ -18,7 +18,6 @@ import argparse
 import cPickle
 import gensim
 
-import utils
 import rte_data
 from config import FileAccess
 import corpusmanager

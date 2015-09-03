@@ -20,7 +20,7 @@ def generate_filter(ending_without_punctuation=False, starting_with=None):
 #         tagger = nlpnet.POSTagger(config.nlpnet_model, 'pt')
     
     def filter_out(sentence):
-        if ending_without_punctuation and sentence[-1] not in '.!?':
+        if ending_without_punctuation and sentence[-1] != '.':
             return True
         
         if starting_with is not None:
