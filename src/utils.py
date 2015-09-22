@@ -5,6 +5,8 @@ Utility functions.
 '''
 
 import re
+from xml.etree import cElementTree as ET
+from xml.dom import minidom
 from nltk.tokenize.regexp import RegexpTokenizer
 
 def generate_filter(ending_without_punctuation=False, starting_with=None):
@@ -20,6 +22,9 @@ def generate_filter(ending_without_punctuation=False, starting_with=None):
 #         tagger = nlpnet.POSTagger(config.nlpnet_model, 'pt')
     
     def filter_out(sentence):
+        if sentence == '':
+            return True
+        
         if ending_without_punctuation and sentence[-1] != '.':
             return True
         
@@ -87,3 +92,51 @@ def tokenize_sentence(text, preprocess=True):
     tokenizer = RegexpTokenizer(tokenizer_regexp)
     
     return tokenizer.tokenize(text)
+
+class XmlWriter(object):
+    '''
+    Class to generate an XML tree iteratively (i.e., allowing new pairs to be
+    added at any time) and to write XML files.
+    '''
+    def __init__(self, **attribs):
+        '''
+        Initialize the root element of the XML tree. Any arguments are given
+        to the XML root.
+        '''
+        self.root = ET.Element('entailment-corpus', attribs)
+        self.pair_id = 1
+    
+    def add_pairs(self, pairs, cluster=None):
+        '''
+        Add the given pairs to the XML tree.
+        '''
+        for pair in pairs:
+            xml_attribs = {'id': str(self.pair_id), 
+                           'entailment': 'UNKNOWN'}
+            self.pair_id += 1
+            
+            if cluster is not None:
+                xml_attribs['cluster'] = str(cluster)
+            
+            # add any other attributes present in the pair
+            xml_attribs.update(pair.attribs)
+            
+            xml_pair = ET.SubElement(self.root, 'pair', xml_attribs)
+            xml_t = ET.SubElement(xml_pair, 't', pair.t_attribs)
+            xml_h = ET.SubElement(xml_pair, 'h', pair.h_attribs)
+            xml_t.text = pair.t.strip()
+            xml_h.text = pair.h.strip()
+    
+    def write_file(self, filename, pretty_print=False):
+        '''
+        Write the actual XML file
+        '''
+        if pretty_print:
+            xml_string = ET.tostring(self.root, 'utf-8')
+            reparsed = minidom.parseString(xml_string)
+        
+            with open(filename, 'wb') as f:
+                f.write(reparsed.toprettyxml('    ', '\n', 'utf-8'))
+        else:
+            tree = ET.ElementTree(self.root)
+            tree.write(filename, 'utf-8', True)
