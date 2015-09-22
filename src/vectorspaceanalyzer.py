@@ -276,11 +276,11 @@ class VectorSpaceAnalyzer(object):
         else:
             return top_indices
     
-    def create_index_for_cluster(self, cluster_dir):
+    def create_index_for_cluster(self, cluster_dir, pre_tokenized=False):
         '''
         Create a gensim index file for the cluster in the given directory.
         '''
-        scm = corpusmanager.InMemorySentenceCorpusManager(cluster_dir)
+        scm = corpusmanager.InMemorySentenceCorpusManager(cluster_dir, pre_tokenized)
         scm.set_yield_ids(self.token_dict)
         vsm_repr = self.transform(scm)
         index = gensim.similarities.MatrixSimilarity(vsm_repr, num_features=self.num_topics)
@@ -289,14 +289,16 @@ class VectorSpaceAnalyzer(object):
         path = os.path.join(cluster_dir, index_filename)
         index.save(path)
     
-    def find_rte_candidates_in_cluster(self, corpus_dir, min_score=0.8, num_pairs=0,
+    def find_rte_candidates_in_cluster(self, corpus_dir, pre_tokenized=False, 
+                                       min_score=0.8, num_pairs=0,
                                        absolute_min_alpha=3,
                                        min_alpha=0.2, max_alpha=1,
                                        max_score=0.99,
                                        min_t_size=5, min_h_size=5,
                                        max_t_size=0, max_h_size=0,
                                        filter_out_t=lambda _: False,
-                                       filter_out_h=lambda _: False):
+                                       filter_out_h=lambda _: False,
+                                       avoid_sentences=None):
         '''
         Find and return RTE candidates within the given documents.
         
@@ -318,8 +320,9 @@ class VectorSpaceAnalyzer(object):
         :param filter_out_t: customized function to filter out T sentences 
             (should return True if the sentence should be discarded)
         :param filter_out_h: same as filter_out_t, but for H
+        :param avoid_sentences: list of sentences that should be avoided
         '''
-        scm = corpusmanager.InMemorySentenceCorpusManager(corpus_dir)
+        scm = corpusmanager.InMemorySentenceCorpusManager(corpus_dir, pre_tokenized)
         scm.set_yield_tokens()
         
         try:
@@ -337,6 +340,9 @@ class VectorSpaceAnalyzer(object):
         ignored_sents = set()
         candidate_pairs = []
         
+        if avoid_sentences is not None:
+            ignored_sents.update(avoid_sentences)
+                
         for i, base_tokens in enumerate(scm):
             base_sent = scm[i]
             if filter_out_t(base_sent):
@@ -421,6 +427,9 @@ class VectorSpaceAnalyzer(object):
                 
                 ignored_sents.add(base_sent)
                 ignored_sents.add(other_sent)
+                
+                # avoid using more than one H for the same T
+                break
         
         return candidate_pairs
     
