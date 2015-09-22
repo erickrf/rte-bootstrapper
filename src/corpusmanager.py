@@ -220,10 +220,15 @@ class InMemorySentenceCorpusManager(CorpusManager):
     
     Only process .txt files. Any other extension is ignored.
     '''
-    def __init__(self, directory):
+    def __init__(self, directory, pre_tokenized=False):
+        '''
+        :param pre_tokenized: indicate that the corpus has already been tokenized;
+            tokens should be separated by whitespace.
+        '''
         self.directory = unicode(directory)
         self.yield_tokens = True
-        self._load_corpus()
+        self.pre_tokenized = pre_tokenized
+        self._load_corpus()        
         
     def _load_corpus(self):
         '''
@@ -231,6 +236,8 @@ class InMemorySentenceCorpusManager(CorpusManager):
         '''
         # use an ordered dict as a set that mantains order
         corpus_sentences = OrderedDict()
+        self.tokenized_cache = {}
+        tokenized_sent_counter = 0
         
         # sort file names, like in the parent class iterator
         file_list = sorted(os.listdir(self.directory))
@@ -240,14 +247,34 @@ class InMemorySentenceCorpusManager(CorpusManager):
                 continue
             
             path = os.path.join(self.directory, filename)
-            file_sentences = self.get_sentences_from_file(path)
+            
+            if self.pre_tokenized:
+                # read both the original and tokenized texts
+                file_text = self.get_text_from_file(path)
+                file_sentences = file_text.split('\n')
+                
+                path_tokenized = path.replace('.txt', '.token')
+                tokenized_text = self.get_text_from_file(path_tokenized)
+                tokenized_sentences = tokenized_text.split('\n')
+                iter_tokenized = iter(tokenized_sentences)
+            else:
+                file_sentences = self.get_sentences_from_file(path)
+            
+            
             for sent in file_sentences:
-                if sent not in corpus_sentences:
-                    corpus_sentences[sent] = None
-        
+                
+                if self.pre_tokenized:
+                    tokenized_sent = iter_tokenized.next()
+                    if sent not in corpus_sentences:
+                        tokens = tokenized_sent.split()
+                        self.tokenized_cache[tokenized_sent_counter] = tokens
+                        tokenized_sent_counter += 1 
+                
+                # the value None is irrelevant here, we only need an ordered set 
+                corpus_sentences[sent] = None
+            
         self.sentences = corpus_sentences.keys()
-        self.tokenized_cache = {}
-    
+        
     def get_tokenized_sentence(self, index):
         '''
         Return the sentence in the position indicated by the index properly tokenized.
