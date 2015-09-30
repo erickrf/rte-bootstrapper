@@ -30,7 +30,7 @@ def recursive_run(directory, only_lines, only_tokens):
     for item in dir_contents:
         full_path = os.path.join(directory, item)        
         if os.path.isdir(full_path):
-            recursive_run(full_path)
+            recursive_run(full_path, only_lines, only_tokens)
         
         if not item.endswith('.txt'):
             # only consider .txt files
@@ -55,7 +55,7 @@ def recursive_run(directory, only_lines, only_tokens):
                 f.write(text.encode('utf-8'))
         
         if not only_lines:
-            tokenized_path = full_path.replace('.txt', 'token')
+            tokenized_path = full_path.replace('.txt', '.token')
             with open(tokenized_path, 'wb') as f:
                 for sentence in sentences:
                     tokens = utils.tokenize_sentence(sentence, True)
@@ -67,7 +67,7 @@ def recursive_run(directory, only_lines, only_tokens):
     logger.info('Tokenized %d files' % files)
         
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('root_dir', help='Corpus root directory')
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-l', help='Only split existing files into one sentence per line '\
