@@ -56,7 +56,7 @@ if __name__ == '__main__':
     writer = utils.XmlWriter(vsm=vsa.method)
     
     if args.avoid is not None:
-        with open('avoid-sentences.txt', 'rb') as f:
+        with open(args.avoid, 'rb') as f:
             avoid_data = json.load(f)
     else:
         avoid_data = {}
