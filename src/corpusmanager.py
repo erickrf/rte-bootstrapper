@@ -6,9 +6,12 @@ import logging
 import cPickle
 from collections import OrderedDict
 import nltk
+import Stemmer
 
 import utils
 from config import FileAccess
+
+stemmer = Stemmer.Stemmer('portuguese')
 
 class CorpusManager(object):
     '''
@@ -88,7 +91,7 @@ class CorpusManager(object):
             par_sentences = sent_tokenizer.tokenize(paragraph, 'pt')
             sentences.extend(par_sentences)
         
-        return sentences        
+        return sentences
         
     def get_tokens_from_file(self, path): 
         '''
@@ -97,9 +100,8 @@ class CorpusManager(object):
         '''
         sentences = self.get_sentences_from_file(path)
         
-        all_tokens = [token
-                      for sent in sentences
-                      for token in utils.tokenize_sentence(sent, True)]
+        all_tokens = [stemmer.stemWords(utils.tokenize_sentence(sent, True))
+                      for sent in sentences]
         
         return all_tokens
     
@@ -142,13 +144,18 @@ class SentenceCorpusManager(CorpusManager):
     on demand, but an initial run is needed in order to compute total corpus size.
     '''
     def __init__(self, corpus_directory,
-                 load_metadata=False, metadata_directory=None):
+                 load_metadata=False, metadata_directory=None, stopwords=None):
         '''
         :param load_metadata: whether to load previously saved metadata
         :param metadata_directory: the directory where the metadata is stored.
             If None, defaults to the current directory.
         '''
         CorpusManager.__init__(self, corpus_directory)
+        
+        if stopwords is not None:
+            self.stopwords = stopwords
+        else:
+            self.stopwords = set()
         
         file_acess = FileAccess(metadata_directory)
         if load_metadata:
@@ -203,7 +210,9 @@ class SentenceCorpusManager(CorpusManager):
                 
                 sentences = self.get_sentences_from_file(full_path)
                 for sentence in sentences:
-                    tokens = utils.tokenize_sentence(sentence, preprocess=True)
+                    tokens = stemmer.stemWords(token
+                                               for token in utils.tokenize_sentence(sentence, preprocess=True)
+                                               if token not in self.stopwords)
                 
                     if self.yield_tokens:
                         yield tokens
@@ -284,7 +293,7 @@ class InMemorySentenceCorpusManager(CorpusManager):
             return self.tokenized_cache[index]
         
         sentence = self[index]
-        tokens = utils.tokenize_sentence(sentence)
+        tokens = stemmer.stemWords(utils.tokenize_sentence(sentence))
         self.tokenized_cache[index] = tokens
         
         return tokens

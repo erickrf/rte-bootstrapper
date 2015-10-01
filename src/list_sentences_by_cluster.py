@@ -29,7 +29,7 @@ def process_file(filename):
     return contents
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('input', nargs='*', help='Input XML files')
     parser.add_argument('output', help='Output file')
     args = parser.parse_args()

@@ -7,16 +7,18 @@ subdirectories of a directory in the file system.
 It will
 1) rewrite existing files so they have one sentence per line
 2) write a new file with the extension .token as a fully tokenized version
+3) optionally, stem tokens
 '''
 
 import argparse
 import os
 import logging
 import nltk
+import Stemmer
 
 import utils
 
-def recursive_run(directory, only_lines, only_tokens):
+def recursive_run(directory, only_lines, only_tokens, stem):
     '''
     Recursively tokenizes files in a directory. It will call itself on 
     subdirectories.
@@ -30,7 +32,7 @@ def recursive_run(directory, only_lines, only_tokens):
     for item in dir_contents:
         full_path = os.path.join(directory, item)        
         if os.path.isdir(full_path):
-            recursive_run(full_path, only_lines, only_tokens)
+            recursive_run(full_path, only_lines, only_tokens, stem)
         
         if not item.endswith('.txt'):
             # only consider .txt files
@@ -59,6 +61,8 @@ def recursive_run(directory, only_lines, only_tokens):
             with open(tokenized_path, 'wb') as f:
                 for sentence in sentences:
                     tokens = utils.tokenize_sentence(sentence, True)
+                    if stem:
+                        tokens = stemmer.stemWords(tokens)
                     line = '%s\n' % ' '.join(tokens)
                     f.write(line.encode('utf-8'))
         
@@ -74,6 +78,7 @@ if __name__ == '__main__':
                        '(do not create tokenized files)', action='store_true', dest='only_lines')
     group.add_argument('-t', help='Only create tokenized files (do not split files into lines)',
                        action='store_true', dest='only_tokens')
+    parser.add_argument('-s', help='Stem tokens', action='store_true', dest='stem')
     parser.add_argument('-v', action='store_true', help='Verbose',
                         dest='verbose')
     args = parser.parse_args()
@@ -82,6 +87,9 @@ if __name__ == '__main__':
     logging.basicConfig(level=log_level)
     logger = logging.getLogger(__name__)
     
+    if args.stem:
+        stemmer = Stemmer.Stemmer('portuguese')
+    
     logger.info('Starting to run')
-    recursive_run(args.root_dir, args.only_lines, args.only_tokens)
+    recursive_run(args.root_dir, args.only_lines, args.only_tokens, args.stem)
         

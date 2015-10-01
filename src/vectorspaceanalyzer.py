@@ -35,7 +35,7 @@ class VectorSpaceAnalyzer(object):
         self.ignored_docs = set()
     
     def generate_model(self, corpus, data_directory, method='lsi', load_dictionary=False, 
-                       stopwords=None, num_topics=100, **corpus_manager_args):
+                       stopwords_file=None, num_topics=100, **corpus_manager_args):
         '''
         Generate a VSM from the given corpus and save it to the given directory.
         
@@ -48,8 +48,15 @@ class VectorSpaceAnalyzer(object):
         :param corpus_manager_args: named arguments supplied to the corpus manager
             object created in this object.
         '''
+        # load all stopwords from the given file
+        if stopwords_file is not None:
+            with open(stopwords_file, 'rb') as f:
+                text = f.read().decode('utf-8')
+            stopwords = set(text.split('\n'))
+        
         self.cm = corpusmanager.SentenceCorpusManager(corpus, 
-                                                      metadata_directory=data_directory, 
+                                                      metadata_directory=data_directory,
+                                                      stopwords=stopwords,
                                                       **corpus_manager_args)
         self.method = method
         self.num_topics = num_topics
@@ -58,7 +65,7 @@ class VectorSpaceAnalyzer(object):
         if load_dictionary:
             self.token_dict = gensim.corpora.Dictionary.load(self.file_access.dictionary)
         else:
-            self.create_dictionary(stopwords)
+            self.create_dictionary()
         
         self.cm.set_yield_ids(self.token_dict)
         self.create_model()
@@ -116,7 +123,7 @@ class VectorSpaceAnalyzer(object):
         else:
             raise ValueError('Unknown VSM method: {}'.format(self.method))
     
-    def create_dictionary(self, stopwords_file=None):
+    def create_dictionary(self):
         '''
         Try to load the dictionary if the given filename is not None.
         If it is, create from the corpus.
@@ -132,18 +139,6 @@ class VectorSpaceAnalyzer(object):
         logging.info('Creating token dictionary')
         for document in self.cm:
             self.token_dict.add_documents([document])
-        
-        if stopwords_file is not None:
-            # load all stopwords from the given file
-            with open(stopwords_file, 'rb') as f:
-                text = f.read().decode('utf-8')
-            stopwords = text.split('\n')
-            
-            # check which words appear in the dictionary and remove them
-            stop_ids = [self.token_dict.token2id[stopword] 
-                        for stopword in stopwords 
-                        if stopword in self.token_dict.token2id]
-            self.token_dict.filter_tokens(stop_ids)
         
         # remove punctuation
         punct_ids = [self.token_dict.token2id[token] 
