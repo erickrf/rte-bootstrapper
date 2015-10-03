@@ -28,7 +28,8 @@ if __name__ == '__main__':
     parser.add_argument('--absolute-alpha', help='Minimum number of different tokens', type=int,
                         default=3, dest='absolute_alpha')
     parser.add_argument('--min-alpha', type=float, default=0.3, dest='min_alpha',
-                        help='Minimum proportion of tokens exclusive to each sentence (default: 0.3)')
+                        help='Minimum proportion of tokens exclusive to each sentence. '\
+                        'If stemming is used, this considers stemmed tokens (default: 0.3)')
     parser.add_argument('--max-alpha', type=float, default=1, dest='max_alpha',
                         help='Maximum proportion of tokens exclusive to each sentence (default: 1)')
     parser.add_argument('--max-t-size', type=int, default=0, dest='max_t_size',
@@ -56,7 +57,7 @@ if __name__ == '__main__':
     writer = utils.XmlWriter(vsm=vsa.method)
     
     if args.avoid is not None:
-        with open('avoid-sentences.txt', 'rb') as f:
+        with open(args.avoid, 'rb') as f:
             avoid_data = json.load(f)
     else:
         avoid_data = {}

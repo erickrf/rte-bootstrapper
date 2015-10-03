@@ -15,6 +15,7 @@ class FileAccess(object):
     vsa_metadata = 'vsa-metadata.dat'
     rp = 'rp.dat'
     corpus_manager = 'corpus-manager.dat'
+    corpus_metadata = 'corpus-metadata.dat'
     hdp = 'hdp.dat'
     
     def __init__(self, directory=None):

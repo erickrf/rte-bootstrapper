@@ -16,23 +16,69 @@ stemmer = Stemmer.Stemmer('portuguese')
 class CorpusManager(object):
     '''
     Class to manage huge corpora. It iterates over the documents in a directory.
-    Documents are considered files whose names end with .txt.
+    Documents are considered files whose names end with .txt (if not pre-tokenized)
+    or .token (if pre-tokenized).
     Files in subdirectories are included.
     '''
     
-    def __init__(self, directory):
+    def __init__(self, directory, stopwords=None, pre_tokenized=False, use_stemmer=False):
         '''
         Constructor. By default, iterating over the corpus returns the tokens, 
         not their id's. Use `set_yield_ids` to change this behavior.
         cm.
         
         :param directory: the path to the directory containing the corpus
+        :param stopwords: list or set of stopwords. If use_stemmer is True, stopwords
+            are checked before applying stemmer.
+        :param pre_tokenized: signal that the corpus is already tokenized; tokens
+            are separated by white spaces
+        :param use_stemmer: use a stemmer in tokens
         '''
         # use unicode to make functions from os module return unicode objects
         # this is important to get the correct filenames
         self.directory = unicode(directory)
+        self.pre_tokenized = pre_tokenized
+        self.file_extension = '.token' if pre_tokenized else '.txt'
         self.yield_tokens = True
+        self.use_stemmer = use_stemmer
         self.length = sum(len(files) for _, _, files in os.walk(self.directory))
+        self._set_stopwords(stopwords)
+    
+    def _set_stopwords(self, stopwords):
+        '''
+        Set the stopwords attribute to a dictionary containing the supplied ones 
+        (which may be empty).
+        '''
+        if stopwords is not None:
+            self.stopwords = set(stopwords)
+        else:
+            self.stopwords = set()
+        
+    def load_configuration(self, filename):
+        '''
+        Load the configuration file specific to the Corpus Manager, such as whether
+        a stemmer is used.
+        '''
+        if not os.path.isfile(filename):
+            logging.warning('Could not find configuration file %s' % filename)
+            logging.warning('Assuming no stemmer is used')
+            self.use_stemmer = False
+            return
+        
+        with open(filename, 'rb') as f:
+            data = cPickle.load(f)
+        self.use_stemmer = data['use_stemmer']
+        self.stopwords = data['stopwords']
+        
+    def save_configuration(self, filename):
+        '''
+        Save the configuration of the Corpus Manager
+        '''
+        data = {'use_stemmer': self.use_stemmer,
+                'stopwords': self.stopwords}
+        
+        with open(filename, 'wb') as f:
+            cPickle.dump(data, f, -1)
     
     def set_yield_tokens(self):
         '''
@@ -55,13 +101,6 @@ class CorpusManager(object):
         '''
         return self.length
     
-#     def __getitem__(self, index):
-#         '''
-#         Overload the [] operator. Return the i-th file in the observed directory.
-#         Note that this is read only.
-#         '''
-#         return self.files[index]
-    
     def get_text_from_file(self, path):
         '''
         Return the text content from the given path
@@ -81,11 +120,16 @@ class CorpusManager(object):
         # we assume that lines contain whole paragraphs. In this case, we can split
         # on line breaks, because no sentence will have a line break within it.
         # also, it helps to properly separate titles without a full stop
-        paragraphs = text.split('\n')
+        lines = text.split('\n')
+        
+        # if the corpus is pre-tokenized, each line is a full sentence
+        if self.pre_tokenized:
+            return lines
+        
         sentences = []
         sent_tokenizer = nltk.data.load('tokenizers/punkt/portuguese.pickle')
         
-        for paragraph in paragraphs:
+        for paragraph in lines:
             # don't change to lower case yet in order not to mess with the
             # sentence splitter
             par_sentences = sent_tokenizer.tokenize(paragraph, 'pt')
@@ -96,12 +140,25 @@ class CorpusManager(object):
     def get_tokens_from_file(self, path): 
         '''
         Tokenize and preprocesses the given text.
-        Preprocessing includes lower case and conversion of digits to 9.
+        Preprocessing includes stemming, lower case and conversion of digits to 9.
+        
+        If the corpus was pre-tokenized, no pre-processing is done.
         '''
         sentences = self.get_sentences_from_file(path)
+        all_tokens = []
         
-        all_tokens = [stemmer.stemWords(utils.tokenize_sentence(sent, True))
-                      for sent in sentences]
+        for sent in sentences:
+            if self.pre_tokenized:
+                tokens = [token for token in sent.split()
+                          if token not in self.stopwords]
+            else:
+                tokens = [token for token in utils.tokenize_sentence(sent, True)
+                          if token not in self.stopwords]
+            
+            if self.use_stemmer:
+                tokens = stemmer.stemWords(tokens)
+            
+            all_tokens.extend(tokens)
         
         return all_tokens
     
@@ -114,7 +171,7 @@ class CorpusManager(object):
         # index through multiple runs in the same corpus)
         file_list = sorted(os.listdir(path))
         for filename in file_list:
-            if not filename.endswith('.txt'):
+            if not filename.endswith(self.file_extension):
                 continue
             
             full_path = os.path.join(path, filename)
@@ -144,33 +201,29 @@ class SentenceCorpusManager(CorpusManager):
     on demand, but an initial run is needed in order to compute total corpus size.
     '''
     def __init__(self, corpus_directory,
-                 load_metadata=False, metadata_directory=None, stopwords=None):
+                 load_metadata=False, metadata_directory=None, 
+                 stopwords=None, pre_tokenized=False, use_stemmer=False):
         '''
         :param load_metadata: whether to load previously saved metadata
         :param metadata_directory: the directory where the metadata is stored.
             If None, defaults to the current directory.
         '''
-        CorpusManager.__init__(self, corpus_directory)
+        CorpusManager.__init__(self, corpus_directory, stopwords, pre_tokenized, use_stemmer)
         
-        if stopwords is not None:
-            self.stopwords = stopwords
-        else:
-            self.stopwords = set()
-        
-        file_acess = FileAccess(metadata_directory)
+        self.file_access = FileAccess(metadata_directory)
         if load_metadata:
-            with open(file_acess.corpus_manager, 'rb') as f:
+            with open(self.file_access.corpus_metadata, 'rb') as f:
                 data = cPickle.load(f)
             self.__dict__.update(data)
-            logging.info('Loaded corpus metadata from {}'.format(file_acess.corpus_manager))
+            logging.info('Loaded corpus metadata from {}'.format(self.file_access.corpus_metadata))
             logging.info('{} total sentences'.format(self.length))
         else:
             self.length = self._compute_length(self.directory)
             data = {'length': self.length}
-            with open(file_acess.corpus_manager, 'wb') as f:
+            with open(self.file_access.corpus_metadata, 'wb') as f:
                 cPickle.dump(data, f, -1)
             
-            logging.info('Saved corpus metadata to {}'.format(file_acess.corpus_manager))
+            logging.info('Saved corpus metadata to {}'.format(self.file_access.corpus_metadata))
     
     def _compute_length(self, root_dir):
         '''
@@ -178,9 +231,10 @@ class SentenceCorpusManager(CorpusManager):
         '''
         num_sents = 0
         logging.info('Counting total number of sentences in directory {}'.format(root_dir))
+        
         for root, _, files in os.walk(root_dir):
             for filename in files:
-                if not filename.endswith('.txt'):
+                if not filename.endswith(self.file_extension):
                     continue
                 
                 path = os.path.join(root, filename)
@@ -205,14 +259,21 @@ class SentenceCorpusManager(CorpusManager):
                     yield item
             else:
                 # this is a file
-                if not filename.endswith('.txt'):
+                if not filename.endswith(self.file_extension):
                     continue
                 
                 sentences = self.get_sentences_from_file(full_path)
                 for sentence in sentences:
-                    tokens = stemmer.stemWords(token
-                                               for token in utils.tokenize_sentence(sentence, preprocess=True)
-                                               if token not in self.stopwords)
+                    if self.pre_tokenized:
+                        tokens = [token for token in sentence.split()
+                                  if token not in self.stopwords]
+                    else:
+                        tokens = [token
+                                  for token in utils.tokenize_sentence(sentence, preprocess=True)
+                                  if token not in self.stopwords]
+                    
+                    if self.use_stemmer:
+                        tokens = stemmer.stemWords(tokens)
                 
                     if self.yield_tokens:
                         yield tokens
@@ -227,17 +288,29 @@ class InMemorySentenceCorpusManager(CorpusManager):
     This class stores all corpus content in memory, so it should only 
     be used with small corpora.
     
-    Only process .txt files. Any other extension is ignored.
+    If not pre-tokenized, only process .txt files. Any other extension is ignored.
+    If pre-tokenized, process .token files instead. 
     '''
-    def __init__(self, directory, pre_tokenized=False):
+    def __init__(self, directory, pre_tokenized=False, configuration_file=None,
+                 use_stemmer=False, stopwords=None):
         '''
         :param pre_tokenized: indicate that the corpus has already been tokenized;
             tokens should be separated by whitespace.
+        :param configuration_file: file saved by another Corpus Manager containing
+            configuration data such as whether to use a stemmer and stopwords list.
+            If given, the next two parameters are ignored.
         '''
         self.directory = unicode(directory)
         self.yield_tokens = True
+        
+        if configuration_file is None:
+            self.use_stemmer = use_stemmer
+            self._set_stopwords(stopwords)
+        else:
+            self.load_configuration(configuration_file)
+        
         self.pre_tokenized = pre_tokenized
-        self._load_corpus()        
+        self._load_corpus()
         
     def _load_corpus(self):
         '''
@@ -275,7 +348,13 @@ class InMemorySentenceCorpusManager(CorpusManager):
                 if self.pre_tokenized:
                     tokenized_sent = iter_tokenized.next()
                     if sent not in corpus_sentences:
-                        tokens = tokenized_sent.split()
+                        # only include non-repeated sentences
+                        tokens = [token for token in tokenized_sent.split()
+                                  if token not in self.stopwords]
+                        
+                        if self.use_stemmer:
+                            tokens = stemmer.stemWords(tokens)
+                        
                         self.tokenized_cache[tokenized_sent_counter] = tokens
                         tokenized_sent_counter += 1 
                 
@@ -293,7 +372,12 @@ class InMemorySentenceCorpusManager(CorpusManager):
             return self.tokenized_cache[index]
         
         sentence = self[index]
-        tokens = stemmer.stemWords(utils.tokenize_sentence(sentence))
+        tokens = [token for token in utils.tokenize_sentence(sentence)
+                  if token not in self.stopwords]
+        
+        if self.use_stemmer:
+            tokens = stemmer.stemWords(tokens)
+        
         self.tokenized_cache[index] = tokens
         
         return tokens
@@ -316,5 +400,3 @@ class InMemorySentenceCorpusManager(CorpusManager):
             else:
                 yield self.dictionary.doc2bow(tokens)
         
-        self._file_num = 0
-        self._sent_num = None

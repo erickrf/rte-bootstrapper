@@ -69,6 +69,7 @@ class VectorSpaceAnalyzer(object):
         
         self.cm.set_yield_ids(self.token_dict)
         self.create_model()
+        self.cm.save_configuration(self.file_access.corpus_manager)
         if self.method == 'hdp':
             # number of topics determined by the algorithm
             # (pretty hard to find, by the way)
@@ -161,23 +162,23 @@ class VectorSpaceAnalyzer(object):
         '''
         Load the models from the given directory.
         '''
-        file_access = FileAccess(directory)
-        with open(file_access.vsa_metadata, 'rb') as f:
+        self.file_access = FileAccess(directory)
+        with open(self.file_access.vsa_metadata, 'rb') as f:
             metadata = cPickle.load(f)
-        self.__dict__.update(metadata)
         
-        self.token_dict = gensim.corpora.Dictionary.load(file_access.dictionary)
+        self.__dict__.update(metadata)
+        self.token_dict = gensim.corpora.Dictionary.load(self.file_access.dictionary)
         
         if self.method == 'lsi':
-            self.tfidf = gensim.models.TfidfModel.load(file_access.tfidf)
-            self.lsi = gensim.models.LsiModel.load(file_access.lsi)
+            self.tfidf = gensim.models.TfidfModel.load(self.file_access.tfidf)
+            self.lsi = gensim.models.LsiModel.load(self.file_access.lsi)
         elif self.method == 'lda':
-            self.tfidf = gensim.models.TfidfModel.load(file_access.tfidf)
-            self.lda = gensim.models.LdaModel.load(file_access.lda)
+            self.tfidf = gensim.models.TfidfModel.load(self.file_access.tfidf)
+            self.lda = gensim.models.LdaModel.load(self.file_access.lda)
         elif self.method == 'rp':
-            self.rp = gensim.models.RpModel.load(file_access.rp)
+            self.rp = gensim.models.RpModel.load(self.file_access.rp)
         elif self.method == 'hdp':
-            self.hdp = gensim.models.HdpModel.load(file_access.hdp)
+            self.hdp = gensim.models.HdpModel.load(self.file_access.hdp)
     
     # TODO: organize the following model creation functions avoiding repeated code
     # (I'm unwilling to use setattr and getattr though) 
@@ -220,7 +221,6 @@ class VectorSpaceAnalyzer(object):
         '''
         self.lda = gensim.models.LdaModel(self.cm,
                                               id2word=self.token_dict,
-                                         
                                               num_topics=self.num_topics)
         filename = self.file_access.lda
         self.lda.save(filename)
@@ -275,7 +275,9 @@ class VectorSpaceAnalyzer(object):
         '''
         Create a gensim index file for the cluster in the given directory.
         '''
-        scm = corpusmanager.InMemorySentenceCorpusManager(cluster_dir, pre_tokenized)
+        scm_config = self.file_access.corpus_manager
+        scm = corpusmanager.InMemorySentenceCorpusManager(cluster_dir, pre_tokenized, 
+                                                          configuration_file=scm_config)
         scm.set_yield_ids(self.token_dict)
         vsm_repr = self.transform(scm)
         index = gensim.similarities.MatrixSimilarity(vsm_repr, num_features=self.num_topics)
@@ -317,7 +319,9 @@ class VectorSpaceAnalyzer(object):
         :param filter_out_h: same as filter_out_t, but for H
         :param avoid_sentences: list of sentences that should be avoided
         '''
-        scm = corpusmanager.InMemorySentenceCorpusManager(corpus_dir, pre_tokenized)
+        scm_config = self.file_access.corpus_manager
+        scm = corpusmanager.InMemorySentenceCorpusManager(corpus_dir, pre_tokenized,
+                                                          configuration_file=scm_config)
         scm.set_yield_tokens()
         
         try:
@@ -348,7 +352,7 @@ class VectorSpaceAnalyzer(object):
             if base_sent in ignored_sents:
                 continue
             
-            # this set actually contains the tokens except for stopwords
+            # this set contains the sentence tokens except for stopwords and rare words
             base_content_words = set(token
                                      for token in base_tokens
                                      if token in self.token_dict.token2id)
@@ -439,6 +443,7 @@ if __name__ == '__main__':
                         dest='quiet')
     parser.add_argument('method', help='Method to generate the vector space',
                         choices=['lsi', 'lda', 'rp', 'hdp'])
+    parser.add_argument('-s', help='Use stemmer', action='store_true', dest='stemmer')
     parser.add_argument('--dir', help='Set a directory to load and save models')
     parser.add_argument('--load-dict', help='Load previously saved dictionary file', 
                         action='store_true', dest='load_dictionary')
@@ -446,6 +451,9 @@ if __name__ == '__main__':
                         action='store_true', 
                         help='Load previously saved corpus metadata. Only used by the '\
                         'SentenceCorpusManager')
+    parser.add_argument('--pre-tokenized', help='Using a pre-tokenized corpus. Tokens should '\
+                        'be sepatated by whitespaces and already pre-processed.',
+                        action='store_true', dest='pre_tokenized')
     args = parser.parse_args()
     
     if not args.quiet:
@@ -454,5 +462,6 @@ if __name__ == '__main__':
     
     vsa = VectorSpaceAnalyzer()
     vsa.generate_model(args.corpus_dir, args.dir, args.method, args.load_dictionary, 
-                       args.stopwords, args.num_topics, load_metadata=args.load_corpus_metadata)
+                       args.stopwords, args.num_topics, load_metadata=args.load_corpus_metadata,
+                       pre_tokenized=args.pre_tokenized, use_stemmer=args.stemmer)
     
