@@ -38,6 +38,12 @@ def recursive_run(directory, only_lines, only_tokens, stem):
             # only consider .txt files
             continue
         
+        tokenized_path = full_path.replace('.txt', '.token')
+        if os.path.isfile(tokenized_path):
+            # there is already a tokenized file
+            logger.info('Already tokenized, skipping: %s' % item)
+            continue
+        
         with open(full_path, 'rb') as f:
             text = unicode(f.read(), 'utf-8')
         
@@ -57,7 +63,6 @@ def recursive_run(directory, only_lines, only_tokens, stem):
                 f.write(text.encode('utf-8'))
         
         if not only_lines:
-            tokenized_path = full_path.replace('.txt', '.token')
             with open(tokenized_path, 'wb') as f:
                 for sentence in sentences:
                     tokens = utils.tokenize_sentence(sentence, True)

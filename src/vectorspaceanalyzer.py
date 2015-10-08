@@ -357,11 +357,12 @@ class VectorSpaceAnalyzer(object):
                                      for token in base_tokens
                                      if token in self.token_dict.token2id)
             
-            if len(base_tokens) < min_t_size:
+            base_length = scm.sentence_sizes[i]
+            if base_length < min_t_size:
                 # discard very short sentences
                 continue
             
-            if max_t_size > 0 and len(base_tokens) > max_t_size:
+            if max_t_size > 0 and base_length > max_t_size:
                 # discard long sentences (considering stop words)
                 continue
             
@@ -385,15 +386,16 @@ class VectorSpaceAnalyzer(object):
                 
                 other_sent = scm[arg]
                 other_tokens = scm.get_tokenized_sentence(arg)
+                other_length = scm.sentence_sizes[arg]
                 if filter_out_h(other_sent):
                     continue
                 if other_sent in ignored_sents:
                     continue
-                 
-                if len(other_tokens) < min_h_size:
+                
+                if other_length < min_h_size:
                     continue
                 
-                if max_h_size > 0 and len(other_tokens) > max_h_size:
+                if max_h_size > 0 and other_length > max_h_size:
                     # discard long sentences (considering stop words)
                     continue
                  

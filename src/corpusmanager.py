@@ -319,6 +319,7 @@ class InMemorySentenceCorpusManager(CorpusManager):
         # use an ordered dict as a set that mantains order
         corpus_sentences = OrderedDict()
         self.tokenized_cache = {}
+        self.sentence_sizes = {}
         tokenized_sent_counter = 0
         
         # sort file names, like in the parent class iterator
@@ -349,7 +350,13 @@ class InMemorySentenceCorpusManager(CorpusManager):
                     tokenized_sent = iter_tokenized.next()
                     if sent not in corpus_sentences:
                         # only include non-repeated sentences
-                        tokens = [token for token in tokenized_sent.split()
+                        tokens = tokenized_sent.split()
+                        
+                        # save the sentence length because after removing stopwords
+                        # we'll have no way of knowing the original length
+                        self.sentence_sizes[tokenized_sent_counter] = len(tokens)
+                        
+                        tokens = [token for token in tokens 
                                   if token not in self.stopwords]
                         
                         if self.use_stemmer:
@@ -372,7 +379,9 @@ class InMemorySentenceCorpusManager(CorpusManager):
             return self.tokenized_cache[index]
         
         sentence = self[index]
-        tokens = [token for token in utils.tokenize_sentence(sentence)
+        tokens = utils.tokenize_sentence(sentence)
+        self.sentence_sizes[index] = len(tokens)
+        tokens = [token for token in tokens
                   if token not in self.stopwords]
         
         if self.use_stemmer:
