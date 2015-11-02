@@ -8,6 +8,8 @@ It will
 1) rewrite existing files so they have one sentence per line
 2) write a new file with the extension .token as a fully tokenized version
 3) optionally, stem tokens
+
+Files already tokenized are ignored.
 '''
 
 import argparse
