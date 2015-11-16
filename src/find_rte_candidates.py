@@ -23,8 +23,8 @@ if __name__ == '__main__':
                         default=0.99, dest='max_score')
     parser.add_argument('--cluster-pairs', help='Candidate pairs per cluster', type=int,
                         default=2)
-    parser.add_argument('--avoid', help='A JSON file listing sentences per cluster that should be avoided. '\
-                        'It can be created with the script list_sentences_by_cluster')
+    parser.add_argument('--avoid', help='A file listing sentences that should be avoided. '\
+                        'It can be created with the script list_used_sentences')
     parser.add_argument('--absolute-alpha', help='Minimum number of different tokens', type=int,
                         default=3, dest='absolute_alpha')
     parser.add_argument('--min-alpha', type=float, default=0.3, dest='min_alpha',
@@ -58,14 +58,14 @@ if __name__ == '__main__':
     
     if args.avoid is not None:
         with open(args.avoid, 'rb') as f:
-            avoid_data = json.load(f)
-    else:
-        avoid_data = {}
+            text = f.read().decode('utf-8')
+            sentences_to_avoid = text.splitlines()
+        vsa.ignored_sents.update(sentences_to_avoid)
     
     # iterate over the clusters
     for cluster in os.listdir(args.clusters):
         cluster_path = os.path.join(args.clusters, cluster)
-        avoid_sentences = avoid_data.get(cluster)
+#         avoid_sentences = avoid_data.get(cluster)
         
         new_pairs = vsa.find_rte_candidates_in_cluster(cluster_path,
                                                        pre_tokenized=args.pre_tokenized,
@@ -80,8 +80,7 @@ if __name__ == '__main__':
                                                        max_t_size=args.max_t_size,
                                                        max_h_size=args.max_h_size,
                                                        filter_out_h=filter_,
-                                                       filter_out_t=filter_,
-                                                       avoid_sentences=avoid_sentences)
+                                                       filter_out_t=filter_)
         
         writer.add_pairs(new_pairs, cluster)
             

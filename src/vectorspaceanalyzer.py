@@ -33,6 +33,7 @@ class VectorSpaceAnalyzer(object):
         useful with this class.
         '''
         self.ignored_docs = set()
+        self.ignored_sents = set()
     
     def generate_model(self, corpus, data_directory, method='lsi', load_dictionary=False, 
                        stopwords_file=None, num_topics=100, **corpus_manager_args):
@@ -294,8 +295,7 @@ class VectorSpaceAnalyzer(object):
                                        min_t_size=5, min_h_size=5,
                                        max_t_size=0, max_h_size=0,
                                        filter_out_t=lambda _: False,
-                                       filter_out_h=lambda _: False,
-                                       avoid_sentences=None):
+                                       filter_out_h=lambda _: False):
         '''
         Find and return RTE candidates within the given documents.
         
@@ -336,12 +336,8 @@ class VectorSpaceAnalyzer(object):
         
         # sentences already used to create pairs are ignored afterwards, in order 
         # to allow more variability
-        ignored_sents = set()
         candidate_pairs = []
-        
-        if avoid_sentences is not None:
-            ignored_sents.update(avoid_sentences)
-                
+                        
         for i, base_tokens in enumerate(scm):
             base_sent = scm[i]
             if filter_out_t(base_sent):
@@ -349,7 +345,7 @@ class VectorSpaceAnalyzer(object):
                 # this filters out titles and image subtitles
                 continue
             
-            if base_sent in ignored_sents:
+            if base_sent in self.ignored_sents:
                 continue
             
             # this set contains the sentence tokens except for stopwords and rare words
@@ -389,7 +385,7 @@ class VectorSpaceAnalyzer(object):
                 other_length = scm.sentence_sizes[arg]
                 if filter_out_h(other_sent):
                     continue
-                if other_sent in ignored_sents:
+                if other_sent in self.ignored_sents:
                     continue
                 
                 if other_length < min_h_size:
@@ -426,8 +422,8 @@ class VectorSpaceAnalyzer(object):
                 if len(candidate_pairs) == num_pairs:
                     return candidate_pairs
                 
-                ignored_sents.add(base_sent)
-                ignored_sents.add(other_sent)
+                self.ignored_sents.add(base_sent)
+                self.ignored_sents.add(other_sent)
                 
                 # avoid using more than one H for the same T
                 break
